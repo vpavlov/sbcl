@@ -63,7 +63,7 @@
 (defun frob-allocation-assembly-routine (obj lowtag arg-tn)
   `(define-assembly-routine (,(intern (format nil "ALLOCATE-~A-TO-~A" obj arg-tn)))
      ((:temp ,arg-tn descriptor-reg ,(intern (format nil "~A-OFFSET" arg-tn))))
-     (pseudo-atomic
+     (with-protected-allocation ()
       (allocation ,arg-tn (pad-data-block ,(intern (format nil "~A-SIZE" obj))))
       (inst lea ,arg-tn (make-ea :byte :base ,arg-tn :disp ,lowtag)))
      (inst ret)))

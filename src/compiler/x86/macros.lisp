@@ -297,7 +297,7 @@
   (unless forms
     (bug "empty &body in WITH-FIXED-ALLOCATION"))
   (once-only ((result-tn result-tn) (size size) (stack-allocate-p stack-allocate-p))
-    `(maybe-pseudo-atomic ,stack-allocate-p
+    `(with-protected-allocation (,stack-allocate-p)
        (allocation ,result-tn (pad-data-block ,size) ,inline ,stack-allocate-p
                    other-pointer-lowtag)
        (storew (logior (ash (1- ,size) n-widetag-bits) ,widetag)
@@ -402,6 +402,12 @@
        ;; using the process signal mask.
        (inst break pending-interrupt-trap)
        (emit-label ,label))))
+
+(defmacro with-protected-allocation ((&optional not-p) &body body)
+  `(let ((*in-allocation* t))
+     ,(if (not not-p)
+          `(pseudo-atomic ,@body)
+          `(maybe-pseudo-atomic ,not-p ,@body))))
 
 ;;;; indexed references
 
