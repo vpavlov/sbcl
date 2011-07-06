@@ -58,7 +58,8 @@
 (defmacro loadw (value ptr &optional (slot 0) (lowtag 0))
   `(inst mov ,value (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro storew (value ptr &optional (slot 0) (lowtag 0) barrier-tmp)
+(defmacro storew (value ptr &optional (slot 0) (lowtag 0)
+                  (barrier-tmp #!+sb-sw-barrier (neq lowtag 0)))
   (once-only ((value value)
               (ptr   ptr)
               (slot  slot)
@@ -76,7 +77,8 @@
 (defmacro pushw (ptr &optional (slot 0) (lowtag 0))
   `(inst push (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro popw (ptr &optional (slot 0) (lowtag 0) barrier-tmp)
+(defmacro popw (ptr &optional (slot 0) (lowtag 0)
+                (barrier-tmp #!+sb-sw-barrier (neq lowtag 0)))
   (once-only ((ptr    ptr)
               (slot   slot)
               (lowtag lowtag))
@@ -173,9 +175,49 @@
                              :disp (+ ,n-offset (1- n-word-bytes))))))))
 
 (defvar *in-allocation* nil)
+(defvar *conditional-write-barrier* nil)
+#!-sb-sw-barrier
 (defun emit-write-barrier (temp value address-tn
                            &optional (offset 0) (lowtag 0))
   (declare (ignore temp value address-tn offset lowtag)))
+
+#!+sb-sw-barrier
+(defun emit-write-barrier (temp value address-tn &optional (offset 0) (lowtag 0))
+  (when (or *in-allocation*
+            (location= address-tn ebp-tn)
+            (location= address-tn esp-tn)
+            (and (tn-p value)
+                 (or (sc-is value immediate)
+                     (and (sb!c::tn-primitive-type value)
+                          (memq (primitive-type-name
+                                 (sb!c::tn-primitive-type value))
+                                '(character fixnum positive-fixnum)))))
+            (integerp value)
+            (sb!c::tn-dx-p address-tn))
+    (return-from emit-write-barrier))
+  (aver (tn-p temp))
+  (aver (eq (sb-name (sc-sb (tn-sc temp))) 'registers))
+  (let* ((offset          (- (* n-word-bytes offset) lowtag))
+         (card-offset     (truncate offset gencgc-card-bytes))
+         (safe-overflow-p (< card-offset gencgc-overflow-card-count))
+         (table           (make-fixup "gencgc_card_table" :foreign
+                                      (if safe-overflow-p card-offset 0)))
+         (temp            (make-random-tn :kind :normal
+                                          :sc (sc-or-lose 'unsigned-reg)
+                                          :offset (logandc2 (tn-offset temp) 1))))
+    (if safe-overflow-p
+        (inst mov temp address-tn)
+        (inst lea temp (make-ea :dword :base address-tn :disp offset)))
+    (inst shr temp (integer-length (1- gencgc-card-bytes)))
+    (inst and temp (1- gencgc-card-count))
+    (if *conditional-write-barrier*
+        (let ((SKIP (gen-label)))
+          (inst lea temp (make-ea :dword :base temp :disp table))
+          (inst cmp 0 (make-ea :byte :base temp))
+          (inst jmp :ne SKIP)
+          (inst mov (make-ea :byte :base temp) 1)
+          (emit-label SKIP))
+        (inst mov (make-ea :byte :base temp :disp table) 1))))
 
 ;;;; allocation helpers
 
@@ -420,7 +462,7 @@
 
 (defmacro define-full-compare-and-swap
     (name type offset lowtag scs el-type &optional translate
-     &aux (barrierp))
+     &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
          ,@(when translate `((:translate ,translate)))
@@ -522,7 +564,7 @@
                                               ,lowtag)))))))))
 
 (defmacro define-full-setter (name type offset lowtag scs el-type &optional translate
-                              &aux (barrierp))
+                              &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
        ,@(when translate
@@ -557,7 +599,7 @@
         (move result value)))))
 
 (defmacro define-full-setter+offset (name type offset lowtag scs el-type &optional translate
-                                     &aux (barrierp))
+                                     &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
        ,@(when translate
