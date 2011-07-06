@@ -146,8 +146,8 @@
        (aver (typep (tn-value type) '(unsigned-byte 8)))
        (storeb (tn-value type) result 0 other-pointer-lowtag))
       (t
-       (storew type result 0 other-pointer-lowtag)))
-    (storew length result vector-length-slot other-pointer-lowtag)
+       (storew type result 0 other-pointer-lowtag nil)))
+    (storew length result vector-length-slot other-pointer-lowtag nil)
     (inst xor zero zero)
     (inst rep)
     (inst stos zero)))

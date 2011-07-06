@@ -29,26 +29,29 @@
   (:args (object :scs (descriptor-reg))
          (value :scs (descriptor-reg any-reg)))
   (:variant-vars offset lowtag)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:policy :fast-safe)
   (:generator 4
-    (storew value object offset lowtag)))
+    (storew value object offset lowtag #!+sb-sw-barrier temp)))
 (define-vop (cell-setf)
   (:args (object :scs (descriptor-reg))
          (value :scs (descriptor-reg any-reg) :target result))
   (:results (result :scs (descriptor-reg any-reg)))
   (:variant-vars offset lowtag)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:policy :fast-safe)
   (:generator 4
-    (storew value object offset lowtag)
+    (storew value object offset lowtag #!+sb-sw-barrier temp)
     (move result value)))
 (define-vop (cell-setf-fun)
   (:args (value :scs (descriptor-reg any-reg) :target result)
          (object :scs (descriptor-reg)))
   (:results (result :scs (descriptor-reg any-reg)))
   (:variant-vars offset lowtag)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:policy :fast-safe)
   (:generator 4
-    (storew value object offset lowtag)
+    (storew value object offset lowtag #!+sb-sw-barrier temp)
     (move result value)))
 
 ;;; Define accessor VOPs for some cells in an object. If the operation
@@ -95,9 +98,11 @@
   (:args (object :scs (descriptor-reg))
          (value :scs (descriptor-reg any-reg immediate)))
   (:variant-vars base lowtag)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:info offset)
   (:generator 4
-     (storew (encode-value-if-immediate value) object (+ base offset) lowtag)))
+     (storew (encode-value-if-immediate value) object (+ base offset) lowtag
+             #!+sb-sw-barrier temp)))
 
 (define-vop (slot-set-conditional)
   (:args (object :scs (descriptor-reg) :to :eval)
@@ -105,11 +110,12 @@
          (new-value :scs (descriptor-reg any-reg) :target temp))
   (:temporary (:sc descriptor-reg :offset eax-offset
                    :from (:argument 1) :to :result :target result)  eax)
-  (:temporary (:sc descriptor-reg :from (:argument 2) :to :result) temp)
+  (:temporary (:sc any-reg) temp)
   (:variant-vars base lowtag)
   (:results (result :scs (descriptor-reg)))
   (:info offset)
   (:generator 4
+    (emit-write-barrier temp new-value object (+ base offset) lowtag)
     (move eax old-value)
     (move temp new-value)
     (inst cmpxchg (make-ea-for-object-slot object (+ base offset) lowtag)

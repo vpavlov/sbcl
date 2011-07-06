@@ -58,9 +58,15 @@
 (defmacro loadw (value ptr &optional (slot 0) (lowtag 0))
   `(inst mov ,value (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro storew (value ptr &optional (slot 0) (lowtag 0))
-  (once-only ((value value))
-    `(inst mov (make-ea-for-object-slot ,ptr ,slot ,lowtag) ,value)))
+(defmacro storew (value ptr &optional (slot 0) (lowtag 0) barrier-tmp)
+  (once-only ((value value)
+              (ptr   ptr)
+              (slot  slot)
+              (lowtag lowtag))
+    `(progn
+       ,(when barrier-tmp
+          `(emit-write-barrier ,barrier-tmp ,value ,ptr ,slot ,lowtag))
+       (inst mov (make-ea-for-object-slot ,ptr ,slot ,lowtag) ,value))))
 
 ;;; A handy macro for storing widetags.
 (defmacro storeb (value ptr &optional (slot 0) (lowtag 0))
@@ -70,8 +76,14 @@
 (defmacro pushw (ptr &optional (slot 0) (lowtag 0))
   `(inst push (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro popw (ptr &optional (slot 0) (lowtag 0))
-  `(inst pop (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
+(defmacro popw (ptr &optional (slot 0) (lowtag 0) barrier-tmp)
+  (once-only ((ptr    ptr)
+              (slot   slot)
+              (lowtag lowtag))
+    `(progn
+       ,(when barrier-tmp
+          `(emit-write-barrier ,barrier-tmp t ,ptr ,slot ,lowtag))
+       (inst pop (make-ea-for-object-slot ,ptr ,slot ,lowtag)))))
 
 (defmacro make-ea-for-vector-data (object &key (size :dword) (offset 0)
                                    index (scale (ash (width-bits size) -3)))
@@ -159,6 +171,11 @@
        `(inst mov ,n-target
               (make-ea :byte :base ,n-source
                              :disp (+ ,n-offset (1- n-word-bytes))))))))
+
+(defvar *in-allocation* nil)
+(defun emit-write-barrier (temp value address-tn
+                           &optional (offset 0) (lowtag 0))
+  (declare (ignore temp value address-tn offset lowtag)))
 
 ;;;; allocation helpers
 
@@ -389,7 +406,8 @@
 ;;;; indexed references
 
 (defmacro define-full-compare-and-swap
-    (name type offset lowtag scs el-type &optional translate)
+    (name type offset lowtag scs el-type &optional translate
+     &aux (barrierp))
   `(progn
      (define-vop (,name)
          ,@(when translate `((:translate ,translate)))
@@ -400,11 +418,11 @@
               (new-value :scs ,scs))
        (:arg-types ,type tagged-num ,el-type ,el-type)
        (:temporary (:sc descriptor-reg :offset eax-offset
-                        :from (:argument 2) :to :result :target value)  eax)
+                        :from (:argument 2) :to :result :target value) eax)
+       ,@(when barrierp `((:temporary (:sc any-reg) temp)))
        (:results (value :scs ,scs))
        (:result-types ,el-type)
        (:generator 5
-         (move eax old-value)
          (let ((ea (sc-case index
                      (immediate
                       (make-ea :dword :base object
@@ -419,6 +437,14 @@
                       (make-ea :dword :base object :index index
                                :disp (- (* ,offset n-word-bytes)
                                         ,lowtag))))))
+           ,(when barrierp
+              `(cond ((sc-is index immediate)
+                      (emit-write-barrier temp new-value object
+                                          (+ ,offset (tn-value index)) ,lowtag))
+                     (t
+                      (inst lea temp ea)
+                      (emit-write-barrier temp new-value temp))))
+           (move eax old-value)
            (inst cmpxchg ea new-value :lock))
          (move value eax)))))
 
@@ -482,7 +508,8 @@
                                                  n-word-bytes)
                                               ,lowtag)))))))))
 
-(defmacro define-full-setter (name type offset lowtag scs el-type &optional translate)
+(defmacro define-full-setter (name type offset lowtag scs el-type &optional translate
+                              &aux (barrierp))
   `(progn
      (define-vop (,name)
        ,@(when translate
@@ -492,23 +519,32 @@
               (index :scs (any-reg immediate))
               (value :scs ,scs :target result))
        (:arg-types ,type tagged-num ,el-type)
+       ,@(when barrierp
+           `((:temporary (:sc any-reg) temp)))
        (:results (result :scs ,scs))
        (:result-types ,el-type)
        (:generator 4                    ; was 5
-         (sc-case index
-           (immediate
-            (inst mov (make-ea :dword :base object
-                               :disp (- (* (+ ,offset (tn-value index))
-                                           n-word-bytes)
-                                        ,lowtag))
-                  value))
-           (t
-            (inst mov (make-ea :dword :base object :index index
-                               :disp (- (* ,offset n-word-bytes) ,lowtag))
-                  value)))
+        (let ((ea (sc-case index
+                    (immediate
+                     (make-ea :dword :base object
+                              :disp (- (* (+ ,offset (tn-value index))
+                                          n-word-bytes)
+                                       ,lowtag)))
+                    (t
+                     (make-ea :dword :base object :index index
+                              :disp (- (* ,offset n-word-bytes) ,lowtag))))))
+          ,(when barrierp
+             `(cond ((sc-is index immediate)
+                     (emit-write-barrier temp value object
+                                         (+ ,offset (tn-value index)) ,lowtag))
+                    (t
+                     (inst lea temp ea)
+                     (emit-write-barrier temp value temp))))
+          (inst mov ea value))
         (move result value)))))
 
-(defmacro define-full-setter+offset (name type offset lowtag scs el-type &optional translate)
+(defmacro define-full-setter+offset (name type offset lowtag scs el-type &optional translate
+                                     &aux (barrierp))
   `(progn
      (define-vop (,name)
        ,@(when translate
@@ -520,21 +556,29 @@
        (:info offset)
        (:arg-types ,type tagged-num
                    (:constant (constant-displacement ,lowtag sb!vm:n-word-bytes ,offset)) ,el-type)
+       ,@(when barrierp
+           `((:temporary (:sc any-reg) temp)))
        (:results (result :scs ,scs))
        (:result-types ,el-type)
        (:generator 4                    ; was 5
-         (sc-case index
-           (immediate
-            (inst mov (make-ea :dword :base object
+         (let ((ea (sc-case index
+                     (immediate
+                      (make-ea :dword :base object
                                :disp (- (* (+ ,offset (tn-value index) offset)
                                            n-word-bytes)
-                                        ,lowtag))
-                  value))
-           (t
-            (inst mov (make-ea :dword :base object :index index
+                                        ,lowtag)))
+                     (t
+                      (make-ea :dword :base object :index index
                                :disp (- (* (+ ,offset offset)
-                                           n-word-bytes) ,lowtag))
-                  value)))
+                                           n-word-bytes) ,lowtag))))))
+           ,(when barrierp
+              `(cond ((sc-is index immediate)
+                      (emit-write-barrier temp value object
+                                          (+ ,offset (tn-value index) offset) ,lowtag))
+                     (t
+                      (inst lea temp ea)
+                      (emit-write-barrier temp value temp))))
+           (inst mov ea value))
         (move result value)))))
 
 ;;; helper for alien stuff.

@@ -1725,7 +1725,7 @@ constant shift greater than word length")))
     (inst mov tmp y)
     (inst inc k)
     (inst shl tmp 7)
-    (storew k state (+ 2 vector-data-offset) other-pointer-lowtag)
+    (storew k state (+ 2 vector-data-offset) other-pointer-lowtag nil)
     (inst and tmp #x9d2c5680)
     (inst xor y tmp)
     ;; y ^= (y << 15) & #xefc60000

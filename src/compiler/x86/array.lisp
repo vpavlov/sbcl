@@ -286,7 +286,7 @@
                   (inst or old value)
                   (unless (zerop shift)
                     (inst rol old shift)))))
-             (storew old object (+ word vector-data-offset) other-pointer-lowtag)
+             (storew old object (+ word vector-data-offset) other-pointer-lowtag nil)
              (sc-case value
                (immediate
                 (inst mov result (tn-value value)))
