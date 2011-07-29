@@ -209,6 +209,10 @@ distribution for more information.\n\
 ", SBCL_VERSION_STRING);
 }
 
+#if defined LISP_FEATURE_BGPCNK
+int stdin_fd = 0;
+#endif
+
 /* Look for a core file to load, first in the directory named by the
  * SBCL_HOME environment variable, then in a hardcoded default
  * location.  Returns a malloced copy of the core filename. */
@@ -444,6 +448,16 @@ main(int argc, char *argv[], char *envp[])
                 end_runtime_options = 1;
                 ++argi;
                 break;
+#if defined (LISP_FEATURE_BGPCNK)
+            }else if (0 == strcmp(arg, "--stdin")) {
+                ++argi;
+                if (argi >= argc)
+                    lose("missing argument for --stdin");
+                stdin_fd = open(argv[argi++], O_RDONLY);
+                if(stdin_fd==-1) {
+                    lose("cannot open stdin replacement");
+                }
+#endif
             } else {
                 /* This option was unrecognized as a runtime option,
                  * so it must be a toplevel option or a user option,

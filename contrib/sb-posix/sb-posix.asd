@@ -11,11 +11,17 @@
     :components ((:file "defpackage")
                  (:file "designator" :depends-on ("defpackage"))
                  (:file "macros" :depends-on ("designator"))
-                 (sb-grovel:grovel-constants-file
+                 #-bgpcnk (sb-grovel:grovel-constants-file
                   "constants"
                   :do-not-grovel #.(progn #-sb-building-contrib t)
                   :package :sb-posix :depends-on  ("defpackage"))
-                 (:file "interface" :depends-on ("constants" "macros" "designator"))))
+                 #+bgpcnk (:file "bgpcnk-constants")
+                 (:file "interface"
+                        :depends-on
+                        (#-bgpcnk "constants"
+                                  #+bgpcnk "bgpcnk-constants"
+                                  "macros"
+                                  "designator"))))
 
 (defsystem sb-posix-tests
     :depends-on (sb-rt)

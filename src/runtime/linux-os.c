@@ -313,6 +313,16 @@ os_validate(os_vm_address_t addr, os_vm_size_t len)
         addr=under_2gb_free_pointer;
     }
 #endif
+
+#ifdef LISP_FEATURE_BGPCNK
+    /* BlueGene/P CNK 1.4.0 will not honor addr unless MAP_FIXED is given.
+       On the other hand, if MAP_FIXED is given, and addr is 0, mmap will
+       fail */
+    if(addr) {
+        flags |= MAP_FIXED;
+    }
+#endif
+
     actual = mmap(addr, len, OS_VM_PROT_ALL, flags, -1, 0);
     if (actual == MAP_FAILED) {
         perror("mmap");
@@ -438,11 +448,31 @@ sigsegv_handler(int signal, siginfo_t *info, os_context_t *context)
             lisp_memory_fault_error(context, addr);
 }
 
+#ifdef LISP_FEATURE_BGPCNK
+extern void *find_amber(os_context_t *context);
+extern void moveto_amber(void *amber, os_context_t *context);
+
+static void
+sigsegv_handler_bgpcnk(int signal, siginfo_t *info, os_context_t *context)
+{
+    void *amber = find_amber(context);
+    sigsegv_handler(signal, info, context);
+    moveto_amber(amber, context);
+}
+
+#endif
+
 void
 os_install_interrupt_handlers(void)
 {
+#ifdef LISP_FEATURE_BGPCNK
+    undoably_install_low_level_interrupt_handler(SIG_MEMORY_FAULT,
+                                                 sigsegv_handler_bgpcnk);
+#else
     undoably_install_low_level_interrupt_handler(SIG_MEMORY_FAULT,
                                                  sigsegv_handler);
+#endif
+
 #ifdef LISP_FEATURE_SB_THREAD
     undoably_install_low_level_interrupt_handler(SIG_STOP_FOR_GC,
                                                  sig_stop_for_gc_handler);

@@ -75,6 +75,10 @@
  * becomes 'yes'.) */
 boolean internal_errors_enabled = 0;
 
+#ifdef LISP_FEATURE_BGPCNK
+extern void schedule_gc(os_context_t *);
+#endif
+
 #ifndef LISP_FEATURE_WIN32
 static
 void (*interrupt_low_level_handlers[NSIG]) (int, siginfo_t*, os_context_t*);
@@ -1936,6 +1940,14 @@ handle_trap(os_context_t *context, int trap)
     case trap_Halt:
         fake_foreign_function_call(context);
         lose("%%PRIMITIVE HALT called; the party is over.\n");
+
+#if defined(LISP_FEATURE_BGPCNK)
+    case trap_ForceGc:
+        schedule_gc(context);
+        arch_skip_instruction(context);
+        break;
+#endif
+
     default:
         unhandled_trap_error(context);
     }

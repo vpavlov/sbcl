@@ -578,10 +578,62 @@ sigtrap_handler(int signal, siginfo_t *siginfo, os_context_t *context)
 }
 
 
+#ifdef LISP_FEATURE_BGPCNK
+void *find_amber(os_context_t *context)
+{
+    void *ptr1 = context->uc_mcontext.uc_regs->gregs;
+    void *ptr2 = ((void *)context) + 0x800 + 0x4a0;  // sizeof(mcontext_t) + 2K
+    int sz = 128; // NUM_GPRS * sizeof(uint32_t)
+    int i;
+
+    for(i=0;i<8;i++) {
+        if(!memcmp(ptr1, ptr2 + i*4, sz)) {
+            return ptr2 + i*4;
+        }
+    }
+    lose("find_amber: Something's wrong! Cannot find the one true context!");
+}
+
+void moveto_amber(void *amber, os_context_t *context)
+{
+    // 32 GPRs
+    void *where = amber;
+    memcpy(where, os_context_register_addr(context, 0), 128);  // 32 GPRS
+
+    // FPSCR
+    where += 640;
+    memcpy(where, &(context->uc_mcontext.uc_regs->fpregs.fpscr),
+           sizeof(double));
+
+    // PC
+    where += sizeof(double);
+    memcpy(where, os_context_pc_addr(context), 4);
+
+    // LR
+    where += 12;
+    memcpy(where, os_context_lr_addr(context), 4);
+}
+
+static void
+sigtrap_handler_bgpcnk(int signal, siginfo_t *siginfo, os_context_t *context)
+{
+    void *amber = find_amber(context);
+    sigtrap_handler(signal, siginfo, context);
+    moveto_amber(amber, context);
+}
+#endif
+
 void arch_install_interrupt_handlers()
 {
+#ifdef LISP_FEATURE_BGPCNK
+    undoably_install_low_level_interrupt_handler(SIGILL,
+                                                 sigtrap_handler_bgpcnk);
+    undoably_install_low_level_interrupt_handler(SIGTRAP,
+                                                 sigtrap_handler_bgpcnk);
+#else
     undoably_install_low_level_interrupt_handler(SIGILL, sigtrap_handler);
     undoably_install_low_level_interrupt_handler(SIGTRAP, sigtrap_handler);
+#endif
 }
 
 void

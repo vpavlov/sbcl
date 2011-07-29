@@ -90,13 +90,25 @@
 ;;; On non-gencgc we need large dynamic and static spaces for PURIFY
 #!-gencgc
 (progn
-  (def!constant read-only-space-start #x04000000)
-  (def!constant read-only-space-end   #x07ff8000)
-  (def!constant static-space-start    #x08000000)
-  (def!constant static-space-end      #x097fff00)
+  #!+bgpcnk
+  (progn
+    (def!constant read-only-space-start #x41d20000)  ;; S x01800000 D x41d20000
+    (def!constant read-only-space-end   #x45d18000)  ;; S x057f8000 D x45d18000
+    (def!constant static-space-start    #x45d20000)  ;; S x05800000 D x45d20000
+    (def!constant static-space-end      #x4751ff00)  ;; S x06ffff00 D x4751ff00
 
-  (def!constant linkage-table-space-start #x0a000000)
-  (def!constant linkage-table-space-end   #x0b000000))
+    (def!constant linkage-table-space-start #x47d20000)  ;; S x07800000 D x47d20000
+    (def!constant linkage-table-space-end   #x48d20000)) ;; S x08800000 D x48d20000
+  #!-bgpcnk
+  (progn
+    (def!constant read-only-space-start #x04000000)
+    (def!constant read-only-space-end   #x07ff8000)
+    (def!constant static-space-start    #x08000000)
+    (def!constant static-space-end      #x097fff00)
+
+    (def!constant linkage-table-space-start #x0a000000)
+    (def!constant linkage-table-space-end   #x0b000000)))
+
 
 ;;; While on gencgc we don't.
 #!+gencgc
@@ -119,10 +131,18 @@
     (def!constant dynamic-space-end   (!configure-dynamic-space-end #x7efff000)))
   #!-gencgc
   (progn
-    (def!constant dynamic-0-space-start #x4f000000)
-    (def!constant dynamic-0-space-end   #x66fff000)
-    (def!constant dynamic-1-space-start #x67000000)
-    (def!constant dynamic-1-space-end   #x7efff000)))
+    #!+bgpcnk
+    (progn
+      (def!constant dynamic-0-space-start #x49d20000)  ;; S x08900000 D x49d20000
+      (def!constant dynamic-0-space-end   #x61d1f000)  ;; S x208ff000 D x61d1f000
+      (def!constant dynamic-1-space-start #x61d20000)  ;; S x20900000 D x61d20000
+      (def!constant dynamic-1-space-end   #x79d1f000)) ;; S x388ff000 D x79d1f000
+    #!-bgpcnk
+    (progn
+      (def!constant dynamic-0-space-start #x4f000000)
+      (def!constant dynamic-0-space-end   #x66fff000)
+      (def!constant dynamic-1-space-start #x67000000)
+      (def!constant dynamic-1-space-end   #x7efff000))))
 
 #!+netbsd
 (progn
@@ -183,7 +203,8 @@
   after-breakpoint-trap
   fixnum-additive-overflow-trap
   single-step-around-trap
-  single-step-before-trap)
+  single-step-before-trap
+  #!+bgpcnk force-gc-trap)
 
 (defenum (:start 24)
   object-not-list-trap

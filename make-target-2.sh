@@ -20,6 +20,13 @@ LANG=C
 LC_ALL=C
 export LANG LC_ALL
 
+stdin_str1=" "
+stdin_str2=" "
+if [ $BGPCNK = 1 ]; then
+    stdin_str1="--stdin make-target-2.lisp"
+    stdin_str2="--stdin make-target-2-load.lisp"
+fi
+
 # Do warm init stuff, e.g. building and loading CLOS, and stuff which
 # can't be done until CLOS is running.
 #
@@ -30,12 +37,12 @@ export LANG LC_ALL
 # without trying to tell you about what it's doing. So unless it hangs
 # for much longer than that, don't worry, it's likely to be normal.
 echo //doing warm init - compilation phase
-./src/runtime/sbcl \
+./src/runtime/sbcl $stdin_str1 \
 --core output/cold-sbcl.core \
 --lose-on-corruption \
 --no-sysinit --no-userinit < make-target-2.lisp
 echo //doing warm init - load and dump phase
-./src/runtime/sbcl \
+./src/runtime/sbcl $stdin_str2 \
 --core output/cold-sbcl.core \
 --lose-on-corruption \
 --no-sysinit --no-userinit < make-target-2-load.lisp

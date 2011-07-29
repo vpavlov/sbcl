@@ -102,7 +102,11 @@ char * sb_realpath (char *path)
     char *ret;
     int errnum;
 
+#if defined(LISP_FEATURE_BGPCNK)
+    if ((ret = malloc(PATH_MAX)) == NULL)
+#else
     if ((ret = calloc(PATH_MAX, sizeof(char))) == NULL)
+#endif
         return NULL;
     if (realpath(path, ret) == NULL) {
         errnum = errno;
@@ -338,7 +342,13 @@ passwd_homedir(struct passwd *p)
             }
         }
     } else {
+#if defined(LISP_FEATURE_BGPCNK)
+        char *result = malloc(3);
+        sprintf(result, "~/");
+        return result;
+#else
         return 0;
+#endif
     }
 }
 

@@ -167,6 +167,10 @@ case "$sbcl_os" in
         printf ' :elf' >> $ltf
         printf ' :linux' >> $ltf
 
+	if [ $BGPCNK = 1 ]; then
+	    printf ' :bgpcnk' >> $ltf
+	fi
+
         # If you add other platforms here, don't forget to edit
         # src/runtime/Config.foo-linux too.
         case "$sbcl_arch" in
@@ -181,7 +185,11 @@ case "$sbcl_os" in
         if [ $sbcl_arch = "x86-64" ]; then
             link_or_copy Config.x86_64-linux Config
         else
-            link_or_copy Config.$sbcl_arch-linux Config
+	    if [ $BGPCNK = 1 ]; then
+		link_or_copy Config.ppc-linux-bgpcnk Config
+	    else
+		link_or_copy Config.$sbcl_arch-linux Config
+	    fi
         fi
         link_or_copy $sbcl_arch-linux-os.h target-arch-os.h
         link_or_copy linux-os.h target-os.h
@@ -336,7 +344,12 @@ elif [ "$sbcl_arch" = "mips" ]; then
     $GNUMAKE -C tools-for-build determine-endianness -I ../src/runtime
     tools-for-build/determine-endianness >> $ltf
 elif [ "$sbcl_arch" = "ppc" ]; then
-    printf ' :gencgc :stack-allocatable-closures :stack-allocatable-lists' >> $ltf
+    if [ $BGPCNK = 1 ] ; then
+	printf ' :stack-allocatable-closures :stack-allocatable-lists :os-provides-dlopen' >> $ltf
+    else
+	printf ' :gencgc :stack-allocatable-closures :stack-allocatable-lists' >> $ltf
+    fi
+
     printf ' :linkage-table :raw-instance-init-vops :memory-barrier-vops' >> $ltf
     printf ' :compare-and-swap-vops' >> $ltf
     if [ "$sbcl_os" = "linux" ]; then

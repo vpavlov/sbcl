@@ -187,9 +187,10 @@
   ;; Normal allocation to the heap.
   (declare (ignore stack-p node)
            #!-gencgc
-           (ignore temp-tn flag-tn))
+           (ignore #!-bgpcnk temp-tn flag-tn))
     #!-gencgc
-    (let ((alloc-size (gensym)))
+    (let ((alloc-size (gensym))
+          (label1 (gensym)))
       `(let ((,alloc-size ,size))
          (if (logbitp (1- n-lowtag-bits) ,lowtag)
              (progn
@@ -199,7 +200,18 @@
                (inst ori ,result-tn ,result-tn ,lowtag)))
          (if (numberp ,alloc-size)
              (inst addi alloc-tn alloc-tn ,alloc-size)
-             (inst add alloc-tn alloc-tn ,alloc-size))))
+             (inst add alloc-tn alloc-tn ,alloc-size))
+         #!+bgpcnk
+         (let ((,label1 (gen-label)))
+           (inst lr ,temp-tn (make-fixup "current_auto_gc_trigger" :foreign))
+           (inst lwz ,temp-tn ,temp-tn 0)
+           (inst cmpwi ,temp-tn 0)
+           (inst beq ,label1)
+           (inst cmpw alloc-tn ,temp-tn)
+           (inst bng ,label1)
+           (inst unimp force-gc-trap)
+           (emit-label ,label1))
+         ))
     #!+gencgc
     `(progn
        ;; Make temp-tn be the size

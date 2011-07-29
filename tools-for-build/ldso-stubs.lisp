@@ -337,7 +337,55 @@ ldso_stub__ ## fct: ;                  \\
                  #!+os-provides-dladdr
                  '("dladdr")
                  #!-sunos ;; !defined(SVR4)
-                 '("sigsetmask")))
+                 '("sigsetmask")
+                 #!+bgpcnk
+                 '("hstrerror"
+                   "getprotobyname"
+                   "getprotobynumber"
+                   "recvfrom"
+                   "sendto"
+                   "sendmsg"
+                   "setsockopt"
+                   "getsockopt"
+                   "recvmsg"
+                   "gethostbyname_r"
+                   "getaddrinfo"
+                   "freeaddrinfo"
+                   "gai_strerror"
+                   "getnameinfo"
+                   "chdir"
+                   "umask"
+                   "chroot"
+                   "fchdir"
+                   "fdatasync"
+                   "lockf"
+                   "mkfifo"
+                   "getresuid"
+                   "seteuid"
+                   "setfsuid"
+                   "setreuid"
+                   "setresuid"
+                   "setuid"
+                   "getresgid"
+                   "setegid"
+                   "setfsgid"
+                   "setgid"
+                   "setregid"
+                   "setresgid"
+                   "alarm"
+                   "getpgid"
+                   "getsid"
+                   "pause"
+                   "wait"
+                   "msync"
+                   "mlockall"
+                   "munlockall"
+                   "getpwnam"
+                   "getgrnam"
+                   "getgrgid"
+                   "tcgetsid"
+                   "utime")
+                 ))
 
 (with-open-file (f "src/runtime/ldso-stubs.S" :direction :output :if-exists :supersede)
   (assert (= (length *preludes*) 2))

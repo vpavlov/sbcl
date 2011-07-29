@@ -25,7 +25,7 @@
   (:variant-vars star)
   (:policy :safe)
   (:node-var node)
-  #!-gencgc (:ignore alloc-temp)
+  #!+(not (or gencgc bgpcnk)) (:ignore alloc-temp)
   (:generator 0
     (cond ((zerop num)
            (move result null-tn))
@@ -189,7 +189,7 @@
   (:args (extra :scs (any-reg)))
   (:arg-types positive-fixnum)
   (:info name words type lowtag)
-  (:ignore name #!-gencgc temp)
+  (:ignore name #!+(not (or gencgc bgpcnk)) temp)
   (:results (result :scs (descriptor-reg)))
   (:temporary (:scs (any-reg)) bytes)
   (:temporary (:scs (non-descriptor-reg)) header)

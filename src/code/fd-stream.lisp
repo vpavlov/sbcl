@@ -2499,6 +2499,9 @@
          (replacement (ef-default-replacement-character ef)))
     `(,keyword :replacement ,replacement)))
 
+#!+bgpcnk
+(sb!alien:define-alien-variable ("stdin_fd" *stdin-fd*) int)
+
 ;;; This is called whenever a saved core is restarted.
 (defun stream-reinit (&optional init-buffers-p)
   (when init-buffers-p
@@ -2507,7 +2510,8 @@
       (setf *available-buffers* nil)))
   (with-output-to-string (*error-output*)
     (setf *stdin*
-          (make-fd-stream 0 :name "standard input" :input t :buffering :line
+          (make-fd-stream #!-bgpcnk 0 #!+bgpcnk *stdin-fd*
+			  :name "standard input" :input t :buffering :line
                           :element-type :default
                           :serve-events t
                           :external-format (stdstream-external-format nil)))

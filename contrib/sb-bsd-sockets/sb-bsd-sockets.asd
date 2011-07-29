@@ -13,11 +13,12 @@
                  (:file "split" :depends-on ("defpackage"))
                  #+win32
                  (:file "win32-lib")
-                 #-win32 (sb-grovel:grovel-constants-file
+                 #-(or win32 bgpcnk) (sb-grovel:grovel-constants-file
                           "constants"
                           :package :sockint
                           :do-not-grovel #.(progn #-sb-building-contrib t)
                           :depends-on  ("defpackage"))
+                 #-(or win32 (not bgpcnk)) (:file "bgpcnk-constants")
                  #+win32 (sb-grovel:grovel-constants-file
                           "win32-constants"
                           :package :sockint
@@ -26,7 +27,9 @@
                  #+win32 (:file "win32-sockets"
                                 :depends-on ("win32-constants"))
                  (:file "sockets"
-                        :depends-on #-win32 ("constants")
+                        :depends-on #-(or win32 bgpcnk) ("constants")
+                                    #-(or win32 (not bgpcnk))
+                                    ("bgpcnk-constants")
                                     #+win32 ("win32-sockets"))
                  (:file "sockopt" :depends-on ("sockets"))
                  (:file "inet" :depends-on ("sockets" "split"))

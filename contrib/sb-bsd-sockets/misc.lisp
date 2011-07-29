@@ -21,7 +21,7 @@
                              sockint::o-nonblock)
                             0))))
 
-#+win32
+#+(or win32 bgpcnk)
 (defmethod non-blocking-mode ((socket socket)) 0)
 
 (defgeneric (setf non-blocking-mode) (non-blocking-p socket)
@@ -42,7 +42,7 @@
       (socket-error "fcntl"))
     non-blocking-p))
 
-#+win32
+#+(or win32 bgpcnk)
 (defmethod (setf non-blocking-mode) (non-blocking-p (socket socket)) 0)
 ;;  (sb-alien:with-alien ((mode (unsigned 32)))
 ;;    (if non-blocking-p (setf mode 1))

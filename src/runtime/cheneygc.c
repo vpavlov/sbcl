@@ -483,10 +483,10 @@ gc_trigger_hit(void *addr)
     }
 }
 
-boolean
-cheneygc_handle_wp_violation(os_context_t *context, void *addr)
+void
+schedule_gc(os_context_t *context)
 {
-    if(!foreign_function_call_active && gc_trigger_hit(addr)){
+    if(!foreign_function_call_active) {
         struct thread *thread=arch_os_get_current_thread();
         clear_auto_gc_trigger();
         /* Don't flood the system with interrupts if the need to gc is
@@ -508,6 +508,14 @@ cheneygc_handle_wp_violation(os_context_t *context, void *addr)
                 SetSymbolValue(GC_PENDING,T,thread);
             }
         }
+    }
+}
+
+boolean
+cheneygc_handle_wp_violation(os_context_t *context, void *addr)
+{
+    if(gc_trigger_hit(addr)) {
+        schedule_gc(context);
         return 1;
     }
     return 0;

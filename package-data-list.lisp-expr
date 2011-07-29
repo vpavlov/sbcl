@@ -2782,7 +2782,8 @@ structure representations"
                "N-WORD-BITS" "N-WORD-BYTES" "N-MACHINE-WORD-BITS"
                "WORD-REG-SC-NUMBER" "WORD-SHIFT"
                #!+win32 "CONTEXT-RESTORE-TRAP"
-               "ZERO-SC-NUMBER"))
+               "ZERO-SC-NUMBER"
+               #!+bgpcnk "FORCE-GC-TRAP"))
 
    #s(sb-cold:package-data
       :name "SB!WALKER"
