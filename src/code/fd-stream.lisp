@@ -2511,7 +2511,7 @@
   (with-output-to-string (*error-output*)
     (setf *stdin*
           (make-fd-stream #!-bgpcnk 0 #!+bgpcnk *stdin-fd*
-			  :name "standard input" :input t :buffering :line
+                          :name "standard input" :input t :buffering :line
                           :element-type :default
                           :serve-events t
                           :external-format (stdstream-external-format nil)))

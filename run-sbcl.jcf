@@ -1,0 +1,12 @@
+# @ job_name = sbcl
+# @ comment = "Steel Bank Common Lisp"
+# @ error = $(jobid).err
+# @ output = $(jobid).out
+# @ environment = COPY_ALL;
+# @ wall_clock_limit = 01:00:00
+# @ job_type = bluegene
+# @ bg_size = 128
+# @ class = n0128
+# @ queue
+/bgsys/drivers/ppcfloor/bin/mpirun -exe ./src/runtime/sbcl -args "--core output/sbcl.core --stdin in" -verbose 1 -mode SMP -np 1 -env SBCL_HOME=./contrib -env BG_PERSISTMEMRESET=1 -env BG_PERSISTMEMSIZE=1 -env LD_LIBRARY_PATH=/bgsys/drivers/ppcfloor/comm/sys/lib:/bgsys/drivers/ppcfloor/runtime/SPI:/bgsys/drivers/ppcfloor/comm/default/lib:/bgsys/drivers/ppcfloor/gnu-linux/powerpc-bgp-linux/lib -env HOME=/bgusr/vpavlov
+
