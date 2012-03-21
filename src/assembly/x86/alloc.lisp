@@ -63,7 +63,7 @@
 (defun frob-allocation-assembly-routine (obj lowtag arg-tn)
   `(define-assembly-routine (,(intern (format nil "ALLOCATE-~A-TO-~A" obj arg-tn)))
      ((:temp ,arg-tn descriptor-reg ,(intern (format nil "~A-OFFSET" arg-tn))))
-     (pseudo-atomic
+     (with-protected-allocation ()
       (allocation ,arg-tn (pad-data-block ,(intern (format nil "~A-SIZE" obj))))
       (inst lea ,arg-tn (make-ea :byte :base ,arg-tn :disp ,lowtag)))
      (inst ret)))
@@ -124,7 +124,7 @@
                  (emit-label not-error))
                (inst add (make-ea-for-symbol-value *free-tls-index*)
                      n-word-bytes)
-               (storew target other symbol-tls-index-slot other-pointer-lowtag)
+               (storew target other symbol-tls-index-slot other-pointer-lowtag nil)
                (emit-label release-tls-index-lock)
                ;; No need for barriers on x86/x86-64 on unlock.
                (store-symbol-value 0 *tls-index-lock*)

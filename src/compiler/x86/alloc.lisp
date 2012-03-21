@@ -40,7 +40,7 @@
              (let ((cons-cells (if star (1- num) num))
                    (stack-allocate-p (awhen (sb!c::node-lvar node)
                                        (sb!c::lvar-dynamic-extent it))))
-               (maybe-pseudo-atomic stack-allocate-p
+               (with-protected-allocation (stack-allocate-p)
                 (allocation res (* (pad-data-block cons-size) cons-cells) node
                             stack-allocate-p list-pointer-lowtag)
                 (move ptr res)
@@ -92,7 +92,7 @@
                                                    n-word-bytes))))
                    (inst and result (lognot lowtag-mask))
                    result))))
-      (pseudo-atomic
+      (with-protected-allocation ()
        (allocation result size)
        (inst lea result (make-ea :byte :base result :disp other-pointer-lowtag))
        (sc-case type
@@ -129,28 +129,29 @@
   (:policy :fast-safe)
   (:node-var node)
   (:generator 100
-    (inst lea result (make-ea :byte :base words :disp
-                              (+ (1- (ash 1 n-lowtag-bits))
-                                 (* vector-data-offset n-word-bytes))))
-    (inst and result (lognot lowtag-mask))
-    ;; FIXME: It would be good to check for stack overflow here.
-    (move ecx words)
-    (inst shr ecx n-fixnum-tag-bits)
-    (allocation result result node t other-pointer-lowtag)
-    (inst cld)
-    (inst lea res
-          (make-ea :byte :base result :disp (- (* vector-data-offset n-word-bytes)
-                                               other-pointer-lowtag)))
-    (sc-case type
-      (immediate
-       (aver (typep (tn-value type) '(unsigned-byte 8)))
-       (storeb (tn-value type) result 0 other-pointer-lowtag))
-      (t
-       (storew type result 0 other-pointer-lowtag)))
-    (storew length result vector-length-slot other-pointer-lowtag)
-    (inst xor zero zero)
-    (inst rep)
-    (inst stos zero)))
+    (with-protected-allocation (t)
+      (inst lea result (make-ea :byte :base words :disp
+                                (+ (1- (ash 1 n-lowtag-bits))
+                                   (* vector-data-offset n-word-bytes))))
+      (inst and result (lognot lowtag-mask))
+      ;; FIXME: It would be good to check for stack overflow here.
+      (move ecx words)
+      (inst shr ecx n-fixnum-tag-bits)
+      (allocation result result node t other-pointer-lowtag)
+      (inst cld)
+      (inst lea res
+            (make-ea :byte :base result :disp (- (* vector-data-offset n-word-bytes)
+                                                 other-pointer-lowtag)))
+      (sc-case type
+        (immediate
+         (aver (typep (tn-value type) '(unsigned-byte 8)))
+         (storeb (tn-value type) result 0 other-pointer-lowtag))
+        (t
+         (storew type result 0 other-pointer-lowtag)))
+      (storew length result vector-length-slot other-pointer-lowtag)
+      (inst xor zero zero)
+      (inst rep)
+      (inst stos zero))))
 
 
 (define-vop (make-fdefn)
@@ -173,7 +174,7 @@
   (:results (result :scs (descriptor-reg)))
   (:node-var node)
   (:generator 10
-   (maybe-pseudo-atomic stack-allocate-p
+   (with-protected-allocation (stack-allocate-p)
      (let ((size (+ length closure-info-offset)))
        (allocation result (pad-data-block size) node
                    stack-allocate-p
@@ -235,7 +236,7 @@
                                        ,@cases)))))
           (aver (null type))
           (inst call (make-fixup dst :assembly-routine)))
-        (maybe-pseudo-atomic stack-allocate-p
+        (with-protected-allocation (stack-allocate-p)
          (allocation result (pad-data-block words) node stack-allocate-p lowtag)
          (when type
            (storew (logior (ash (1- words) n-widetag-bits) type)
@@ -260,7 +261,7 @@
     (inst lea header                    ; (w-1 << 8) | type
           (make-ea :dword :base header :disp (+ (ash -2 n-widetag-bits) type)))
     (inst and bytes (lognot lowtag-mask))
-    (pseudo-atomic
+    (with-protected-allocation ()
      (allocation result bytes node)
      (inst lea result (make-ea :byte :base result :disp lowtag))
      (storew header result 0 lowtag))))

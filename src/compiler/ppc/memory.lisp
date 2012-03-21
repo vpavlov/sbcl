@@ -27,9 +27,10 @@
   (:args (object :scs (descriptor-reg))
          (value :scs (descriptor-reg any-reg)))
   (:variant-vars offset lowtag)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:policy :fast-safe)
   (:generator 4
-    (storew value object offset lowtag)))
+    (storew value object offset lowtag #!+sb-sw-barrier temp)))
 
 ;;; Slot-Ref and Slot-Set are used to define VOPs like Closure-Ref, where the
 ;;; offset is constant at compile time, but varies for different uses.  We add
@@ -48,52 +49,65 @@
          (value :scs (descriptor-reg any-reg)))
   (:variant-vars base lowtag)
   (:info offset)
+  #!+sb-sw-barrier (:temporary (:sc any-reg) temp)
   (:generator 4
-    (storew value object (+ base offset) lowtag)))
+    (storew value object (+ base offset) lowtag #!+sb-sw-barrier temp)))
 
 
 
 ;;;; Indexed references:
 
 ;;; Define some VOPs for indexed memory reference.
-(defmacro define-indexer (name write-p ri-op rr-op shift &optional sign-extend-byte)
-  `(define-vop (,name)
-     (:args (object :scs (descriptor-reg))
-            (index :scs (any-reg zero immediate))
-            ,@(when write-p
-                '((value :scs (any-reg descriptor-reg) :target result))))
-     (:arg-types * tagged-num ,@(when write-p '(*)))
-     (:temporary (:scs (non-descriptor-reg)) temp)
-     (:results (,(if write-p 'result 'value)
-                :scs (any-reg descriptor-reg)))
-     (:result-types *)
-     (:variant-vars offset lowtag)
-     (:policy :fast-safe)
-     (:generator 5
-       (sc-case index
-         ((immediate zero)
-          (let ((offset (- (+ (if (sc-is index zero)
-                                  0
-                                  (ash (tn-value index)
-                                       (- word-shift ,shift)))
-                              (ash offset word-shift))
-                           lowtag)))
-            (etypecase offset
-              ((signed-byte 16)
-               (inst ,ri-op value object offset))
-              ((or (unsigned-byte 32) (signed-byte 32))
-               (inst lr temp offset)
-               (inst ,rr-op value object temp)))))
-         (t
-          ,@(unless (zerop shift)
-              `((inst srwi temp index ,shift)))
-          (inst addi temp ,(if (zerop shift) 'index 'temp)
-                (- (ash offset word-shift) lowtag))
-          (inst ,rr-op value object temp)))
-       ,@(when sign-extend-byte
-           `((inst extsb value value)))
-       ,@(when write-p
-           '((move result value))))))
+(defmacro define-indexer (name write-p ri-op rr-op shift
+			  &optional sign-extend-byte)
+  (let ((barrier-p #!+sb-sw-barrier (and write-p (zerop shift 0))))
+    `(define-vop (,name)
+       (:args (object :scs (descriptor-reg))
+	      (index :scs (any-reg zero immediate))
+	      ,@(when write-p '((value :scs (any-reg descriptor-reg)
+				 :target result))))
+       (:arg-types * tagged-num ,@(when write-p '(*)))
+       (:temporary (:scs (non-descriptor-reg)) temp)
+       ,@(when barrier-p '((:temporary (:scs (non-descriptor-reg)) temp2)))
+       (:results (,(if write-p 'result 'value)
+		   :scs (any-reg descriptor-reg)))
+       (:result-types *)
+       (:variant-vars offset lowtag)
+       (:policy :fast-safe)
+       (:generator
+	5
+	(sc-case index
+	  ((immediate zero)
+	   (let ((boffset (+ (if (sc-is index zero) 0 (tn-value index))
+			     offset))
+		 (offset (- (+ (if (sc-is index zero)
+				   0
+				   (ash (tn-value index)
+					(- word-shift ,shift)))
+			       (ash offset word-shift))
+			    lowtag)))
+	     ,@(when barrier-p
+		     `((emit-write-barrier temp value object boffset lowtag)))
+	     (etypecase offset
+	       ((signed-byte 16)
+		(inst ,ri-op value object offset))
+	       ((or (unsigned-byte 32) (signed-byte 32))
+		(inst lr temp offset)
+		(inst ,rr-op value object temp)))))
+	  (t
+	   ,@(when barrier-p
+		   `((progn
+		       (inst add temp2 object index)
+		       (emit-write-barrier temp value temp2 offset lowtag))))
+	   ,@(unless (zerop shift)
+		     `((inst srwi temp index ,shift)))
+	   (inst addi temp ,(if (zerop shift) 'index 'temp)
+		 (- (ash offset word-shift) lowtag))
+	   (inst ,rr-op value object temp)))
+	,@(when sign-extend-byte
+		`((inst extsb value value)))
+	,@(when write-p
+		'((move result value)))))))
 
 (define-indexer word-index-ref nil lwz lwzx 0)
 (define-indexer word-index-set t stw stwx 0)
@@ -112,6 +126,7 @@
          (new-value :scs (any-reg descriptor-reg)))
   (:arg-types * tagged-num * *)
   (:temporary (:sc non-descriptor-reg) temp)
+  #!+sb-sw-barrier (:temporary (:sc non-descriptor-reg) temp2)
   (:results (result :scs (any-reg descriptor-reg) :from :load))
   (:result-types *)
   (:variant-vars offset lowtag)
@@ -119,13 +134,23 @@
   (:generator 5
     (sc-case index
       ((immediate zero)
-       (let ((offset (- (+ (if (sc-is index zero)
+       (let ((boffset (+ (if (sc-is index zero) 0 (tn-value index))
+			      offset))
+	     (offset (- (+ (if (sc-is index zero)
                                0
                              (ash (tn-value index) word-shift))
                            (ash offset word-shift))
                         lowtag)))
+	 #!+sb-sw-barrier
+	 (emit-write-barrier temp new-value object boffset lowtag)
          (inst lr temp offset)))
       (t
+
+       #!+sb-sw-barrier
+       (inst add temp2 object index)
+       #!+sb-sw-barrier
+       (emit-write-barrier temp new-value temp2 offset lowtag)
+
        ;; KLUDGE: This relies on N-FIXNUM-TAG-BITS being the same as
        ;; WORD-SHIFT.  I know better than to do this.  --AB, 2010-Jun-16
        (inst addi temp index

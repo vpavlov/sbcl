@@ -40,7 +40,7 @@
     (inst shl header n-widetag-bits)
     (inst or  header type)
     (inst shr header n-fixnum-tag-bits)
-    (pseudo-atomic
+    (with-protected-allocation ()
      (allocation result bytes node)
      (inst lea result (make-ea :qword :base result :disp other-pointer-lowtag))
      (storew header result 0 other-pointer-lowtag))))

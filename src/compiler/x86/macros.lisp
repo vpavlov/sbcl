@@ -58,9 +58,16 @@
 (defmacro loadw (value ptr &optional (slot 0) (lowtag 0))
   `(inst mov ,value (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro storew (value ptr &optional (slot 0) (lowtag 0))
-  (once-only ((value value))
-    `(inst mov (make-ea-for-object-slot ,ptr ,slot ,lowtag) ,value)))
+(defmacro storew (value ptr &optional (slot 0) (lowtag 0)
+                  (barrier-tmp #!+sb-sw-barrier (neq lowtag 0)))
+  (once-only ((value value)
+              (ptr   ptr)
+              (slot  slot)
+              (lowtag lowtag))
+    `(progn
+       ,(when barrier-tmp
+          `(emit-write-barrier ,barrier-tmp ,value ,ptr ,slot ,lowtag))
+       (inst mov (make-ea-for-object-slot ,ptr ,slot ,lowtag) ,value))))
 
 ;;; A handy macro for storing widetags.
 (defmacro storeb (value ptr &optional (slot 0) (lowtag 0))
@@ -70,8 +77,15 @@
 (defmacro pushw (ptr &optional (slot 0) (lowtag 0))
   `(inst push (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
 
-(defmacro popw (ptr &optional (slot 0) (lowtag 0))
-  `(inst pop (make-ea-for-object-slot ,ptr ,slot ,lowtag)))
+(defmacro popw (ptr &optional (slot 0) (lowtag 0)
+                (barrier-tmp #!+sb-sw-barrier (neq lowtag 0)))
+  (once-only ((ptr    ptr)
+              (slot   slot)
+              (lowtag lowtag))
+    `(progn
+       ,(when barrier-tmp
+          `(emit-write-barrier ,barrier-tmp t ,ptr ,slot ,lowtag))
+       (inst pop (make-ea-for-object-slot ,ptr ,slot ,lowtag)))))
 
 (defmacro make-ea-for-vector-data (object &key (size :dword) (offset 0)
                                    index (scale (ash (width-bits size) -3)))
@@ -160,6 +174,51 @@
               (make-ea :byte :base ,n-source
                              :disp (+ ,n-offset (1- n-word-bytes))))))))
 
+(defvar *in-allocation* nil)
+(defvar *conditional-write-barrier* nil)
+#!-sb-sw-barrier
+(defun emit-write-barrier (temp value address-tn
+                           &optional (offset 0) (lowtag 0))
+  (declare (ignore temp value address-tn offset lowtag)))
+
+#!+sb-sw-barrier
+(defun emit-write-barrier (temp value address-tn &optional (offset 0) (lowtag 0))
+  (when (or *in-allocation*
+            (location= address-tn ebp-tn)
+            (location= address-tn esp-tn)
+            (and (tn-p value)
+                 (or (sc-is value immediate)
+                     (and (sb!c::tn-primitive-type value)
+                          (memq (primitive-type-name
+                                 (sb!c::tn-primitive-type value))
+                                '(character fixnum positive-fixnum)))))
+            (integerp value)
+            (sb!c::tn-dx-p address-tn))
+    (return-from emit-write-barrier))
+  (aver (tn-p temp))
+  (aver (eq (sb-name (sc-sb (tn-sc temp))) 'registers))
+  (let* ((offset          (- (* n-word-bytes offset) lowtag))
+         (card-offset     (truncate offset gencgc-card-bytes))
+         (safe-overflow-p (< card-offset gencgc-overflow-card-count))
+         (table           (make-fixup "gencgc_card_table" :foreign
+                                      (if safe-overflow-p card-offset 0)))
+         (temp            (make-random-tn :kind :normal
+                                          :sc (sc-or-lose 'unsigned-reg)
+                                          :offset (logandc2 (tn-offset temp) 1))))
+    (if safe-overflow-p
+        (inst mov temp address-tn)
+        (inst lea temp (make-ea :dword :base address-tn :disp offset)))
+    (inst shr temp (integer-length (1- gencgc-card-bytes)))
+    (inst and temp (1- gencgc-card-count))
+    (if *conditional-write-barrier*
+        (let ((SKIP (gen-label)))
+          (inst lea temp (make-ea :dword :base temp :disp table))
+          (inst cmp 0 (make-ea :byte :base temp))
+          (inst jmp :ne SKIP)
+          (inst mov (make-ea :byte :base temp) 1)
+          (emit-label SKIP))
+        (inst mov (make-ea :byte :base temp :disp table) 1))))
+
 ;;;; allocation helpers
 
 ;;; Allocation within alloc_region (which is thread local) can be done
@@ -175,6 +234,13 @@
 ;;; overhead.
 
 (defun allocation-dynamic-extent (alloc-tn size lowtag)
+  ;; This asks for an amount of non-trickery on the part of DX-
+  ;; allocating VOPs.  The function assumes that the VOP has
+  ;; alloc-tn as a result.  So, if there's exactly one write to
+  ;; alloc-tn, then it's the allocating VOP, and we're good.
+  (when (and (sb!c::tn-writes alloc-tn)
+             (not (sb!c::tn-ref-next (sb!c::tn-writes alloc-tn))))
+    (setf (sb!c::tn-dx-p alloc-tn) t))
   (inst sub esp-tn size)
   ;; FIXME: SIZE _should_ be double-word aligned (suggested but
   ;; unfortunately not enforced by PAD-DATA-BLOCK and
@@ -280,7 +346,7 @@
   (unless forms
     (bug "empty &body in WITH-FIXED-ALLOCATION"))
   (once-only ((result-tn result-tn) (size size) (stack-allocate-p stack-allocate-p))
-    `(maybe-pseudo-atomic ,stack-allocate-p
+    `(with-protected-allocation (,stack-allocate-p)
        (allocation ,result-tn (pad-data-block ,size) ,inline ,stack-allocate-p
                    other-pointer-lowtag)
        (storew (logior (ash (1- ,size) n-widetag-bits) ,widetag)
@@ -385,11 +451,18 @@
        ;; using the process signal mask.
        (inst break pending-interrupt-trap)
        (emit-label ,label))))
+
+(defmacro with-protected-allocation ((&optional not-p) &body body)
+  `(let ((*in-allocation* t))
+     ,(if (not not-p)
+          `(pseudo-atomic ,@body)
+          `(maybe-pseudo-atomic ,not-p ,@body))))
 
 ;;;; indexed references
 
 (defmacro define-full-compare-and-swap
-    (name type offset lowtag scs el-type &optional translate)
+    (name type offset lowtag scs el-type &optional translate
+     &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
          ,@(when translate `((:translate ,translate)))
@@ -400,11 +473,11 @@
               (new-value :scs ,scs))
        (:arg-types ,type tagged-num ,el-type ,el-type)
        (:temporary (:sc descriptor-reg :offset eax-offset
-                        :from (:argument 2) :to :result :target value)  eax)
+                        :from (:argument 2) :to :result :target value) eax)
+       ,@(when barrierp `((:temporary (:sc any-reg) temp)))
        (:results (value :scs ,scs))
        (:result-types ,el-type)
        (:generator 5
-         (move eax old-value)
          (let ((ea (sc-case index
                      (immediate
                       (make-ea :dword :base object
@@ -419,6 +492,14 @@
                       (make-ea :dword :base object :index index
                                :disp (- (* ,offset n-word-bytes)
                                         ,lowtag))))))
+           ,(when barrierp
+              `(cond ((sc-is index immediate)
+                      (emit-write-barrier temp new-value object
+                                          (+ ,offset (tn-value index)) ,lowtag))
+                     (t
+                      (inst lea temp ea)
+                      (emit-write-barrier temp new-value temp))))
+           (move eax old-value)
            (inst cmpxchg ea new-value :lock))
          (move value eax)))))
 
@@ -482,7 +563,8 @@
                                                  n-word-bytes)
                                               ,lowtag)))))))))
 
-(defmacro define-full-setter (name type offset lowtag scs el-type &optional translate)
+(defmacro define-full-setter (name type offset lowtag scs el-type &optional translate
+                              &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
        ,@(when translate
@@ -492,23 +574,32 @@
               (index :scs (any-reg immediate))
               (value :scs ,scs :target result))
        (:arg-types ,type tagged-num ,el-type)
+       ,@(when barrierp
+           `((:temporary (:sc any-reg) temp)))
        (:results (result :scs ,scs))
        (:result-types ,el-type)
        (:generator 4                    ; was 5
-         (sc-case index
-           (immediate
-            (inst mov (make-ea :dword :base object
-                               :disp (- (* (+ ,offset (tn-value index))
-                                           n-word-bytes)
-                                        ,lowtag))
-                  value))
-           (t
-            (inst mov (make-ea :dword :base object :index index
-                               :disp (- (* ,offset n-word-bytes) ,lowtag))
-                  value)))
+        (let ((ea (sc-case index
+                    (immediate
+                     (make-ea :dword :base object
+                              :disp (- (* (+ ,offset (tn-value index))
+                                          n-word-bytes)
+                                       ,lowtag)))
+                    (t
+                     (make-ea :dword :base object :index index
+                              :disp (- (* ,offset n-word-bytes) ,lowtag))))))
+          ,(when barrierp
+             `(cond ((sc-is index immediate)
+                     (emit-write-barrier temp value object
+                                         (+ ,offset (tn-value index)) ,lowtag))
+                    (t
+                     (inst lea temp ea)
+                     (emit-write-barrier temp value temp))))
+          (inst mov ea value))
         (move result value)))))
 
-(defmacro define-full-setter+offset (name type offset lowtag scs el-type &optional translate)
+(defmacro define-full-setter+offset (name type offset lowtag scs el-type &optional translate
+                                     &aux (barrierp #!+sb-sw-barrier (memq el-type '(* t))))
   `(progn
      (define-vop (,name)
        ,@(when translate
@@ -520,21 +611,29 @@
        (:info offset)
        (:arg-types ,type tagged-num
                    (:constant (constant-displacement ,lowtag sb!vm:n-word-bytes ,offset)) ,el-type)
+       ,@(when barrierp
+           `((:temporary (:sc any-reg) temp)))
        (:results (result :scs ,scs))
        (:result-types ,el-type)
        (:generator 4                    ; was 5
-         (sc-case index
-           (immediate
-            (inst mov (make-ea :dword :base object
+         (let ((ea (sc-case index
+                     (immediate
+                      (make-ea :dword :base object
                                :disp (- (* (+ ,offset (tn-value index) offset)
                                            n-word-bytes)
-                                        ,lowtag))
-                  value))
-           (t
-            (inst mov (make-ea :dword :base object :index index
+                                        ,lowtag)))
+                     (t
+                      (make-ea :dword :base object :index index
                                :disp (- (* (+ ,offset offset)
-                                           n-word-bytes) ,lowtag))
-                  value)))
+                                           n-word-bytes) ,lowtag))))))
+           ,(when barrierp
+              `(cond ((sc-is index immediate)
+                      (emit-write-barrier temp value object
+                                          (+ ,offset (tn-value index) offset) ,lowtag))
+                     (t
+                      (inst lea temp ea)
+                      (emit-write-barrier temp value temp))))
+           (inst mov ea value))
         (move result value)))))
 
 ;;; helper for alien stuff.

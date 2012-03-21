@@ -26,11 +26,19 @@
          (value :scs (descriptor-reg any-reg immediate)))
   (:info name offset lowtag)
   (:ignore name)
+  #!+sb-sw-barrier (:temporary (:sc descriptor-reg) temp)
   (:results)
   (:generator 1
-     (storew (encode-value-if-immediate value) object offset lowtag)))
+     (storew (encode-value-if-immediate value) object offset lowtag #!+sb-sw-barrier temp)))
 
-(define-vop (init-slot set-slot))
+(define-vop (init-slot)
+  (:args (object :scs (descriptor-reg))
+         (value :scs (descriptor-reg any-reg immediate)))
+  (:info name offset lowtag)
+  (:ignore name)
+  (:results)
+  (:generator 1
+     (storew (encode-value-if-immediate value) object offset lowtag nil)))
 
 (define-vop (compare-and-swap-slot)
   (:args (object :scs (descriptor-reg) :to :eval)
@@ -39,10 +47,14 @@
   (:temporary (:sc descriptor-reg :offset eax-offset
                    :from (:argument 1) :to :result :target result)
               eax)
+  #!+sb-sw-barrier
+  (:temporary (:sc any-reg) temp)
   (:info name offset lowtag)
   (:ignore name)
   (:results (result :scs (descriptor-reg any-reg)))
   (:generator 5
+     #!+sb-sw-barrier
+     (emit-write-barrier temp new object offset lowtag)
      (move eax old)
      (inst cmpxchg (make-ea :dword :base object
                             :disp (- (* offset n-word-bytes) lowtag))
@@ -57,7 +69,7 @@
          (old :scs (descriptor-reg any-reg) :target eax)
          (new :scs (descriptor-reg any-reg)))
   (:temporary (:sc descriptor-reg :offset eax-offset) eax)
-  #!+sb-thread
+  #!+(or sb-thread sb-sw-barrier)
   (:temporary (:sc descriptor-reg) tls)
   (:results (result :scs (descriptor-reg any-reg)))
   (:policy :fast-safe)
@@ -77,6 +89,8 @@
         (inst cmp eax no-tls-value-marker-widetag)
         (inst jmp :ne check)
         (move eax old))
+      #!+sb-sw-barrier
+      (emit-write-barrier tls new symbol symbol-value-slot other-pointer-lowtag)
       (inst cmpxchg (make-ea :dword :base symbol
                              :disp (- (* symbol-value-slot n-word-bytes)
                                       other-pointer-lowtag))
@@ -122,7 +136,7 @@
         (inst mov (make-ea :dword :base tls) value :fs)
         (inst jmp done)
         (emit-label global-val)
-        (storew value symbol symbol-value-slot other-pointer-lowtag)
+        (storew value symbol symbol-value-slot other-pointer-lowtag #!+sb-sw-barrier tls)
         (emit-label done))))
 
   ;; With Symbol-Value, we check that the value isn't the trap object. So
@@ -249,8 +263,8 @@
     (inst jmp :e normal-fn)
     (inst lea raw (make-fixup "closure_tramp" :foreign))
     NORMAL-FN
-    (storew function fdefn fdefn-fun-slot other-pointer-lowtag)
-    (storew raw fdefn fdefn-raw-addr-slot other-pointer-lowtag)
+    (storew function fdefn fdefn-fun-slot other-pointer-lowtag type)
+    (storew raw fdefn fdefn-raw-addr-slot other-pointer-lowtag nil)
     (move result function)))
 
 (define-vop (fdefn-makunbound)
@@ -259,9 +273,9 @@
   (:args (fdefn :scs (descriptor-reg) :target result))
   (:results (result :scs (descriptor-reg)))
   (:generator 38
-    (storew nil-value fdefn fdefn-fun-slot other-pointer-lowtag)
+    (storew nil-value fdefn fdefn-fun-slot other-pointer-lowtag nil)
     (storew (make-fixup "undefined_tramp" :foreign)
-            fdefn fdefn-raw-addr-slot other-pointer-lowtag)
+            fdefn fdefn-raw-addr-slot other-pointer-lowtag nil)
     (move result fdefn)))
 
 ;;;; binding and unbinding
@@ -316,7 +330,7 @@
     (store-symbol-value bsp *binding-stack-pointer*)
     (storew temp bsp (- binding-value-slot binding-size))
     (storew symbol bsp (- binding-symbol-slot binding-size))
-    (storew val symbol symbol-value-slot other-pointer-lowtag)))
+    (storew val symbol symbol-value-slot other-pointer-lowtag temp)))
 
 #!+sb-thread
 (define-vop (unbind)
@@ -337,12 +351,12 @@
 
 #!-sb-thread
 (define-vop (unbind)
-  (:temporary (:sc unsigned-reg) symbol value bsp)
+  (:temporary (:sc unsigned-reg) symbol value bsp temp)
   (:generator 0
     (load-symbol-value bsp *binding-stack-pointer*)
     (loadw symbol bsp (- binding-symbol-slot binding-size))
     (loadw value bsp (- binding-value-slot binding-size))
-    (storew value symbol symbol-value-slot other-pointer-lowtag)
+    (storew value symbol symbol-value-slot other-pointer-lowtag temp)
     (storew 0 bsp (- binding-symbol-slot binding-size))
     (storew 0 bsp (- binding-value-slot binding-size))
     (inst sub bsp (* binding-size n-word-bytes))
@@ -351,7 +365,7 @@
 
 (define-vop (unbind-to-here)
   (:args (where :scs (descriptor-reg any-reg)))
-  (:temporary (:sc unsigned-reg) symbol value bsp #!+sb-thread tls-index)
+  (:temporary (:sc unsigned-reg) symbol value bsp #!+sb-thread tls-index #!-sb-thread temp)
   (:generator 0
     (load-binding-stack-pointer bsp)
     (inst cmp where bsp)
@@ -365,7 +379,7 @@
     (inst cmp symbol unbound-marker-widetag)
     (inst jmp :eq skip)
     (loadw value bsp (- binding-value-slot binding-size))
-    #!-sb-thread (storew value symbol symbol-value-slot other-pointer-lowtag)
+    #!-sb-thread (storew value symbol symbol-value-slot other-pointer-lowtag temp)
 
     #!+sb-thread (loadw
                   tls-index symbol symbol-tls-index-slot other-pointer-lowtag)
@@ -425,7 +439,7 @@
   (:args (object :scs (descriptor-reg)))
   (:info offset)
   (:generator 4
-    (storew ebp-tn object (+ closure-info-offset offset) fun-pointer-lowtag)))
+    (storew ebp-tn object (+ closure-info-offset offset) fun-pointer-lowtag nil)))
 
 ;;;; value cell hackery
 

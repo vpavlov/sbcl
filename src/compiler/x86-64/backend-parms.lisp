@@ -35,10 +35,19 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *backend-page-bytes* 32768))
 
+;;; The size of the card table in cards.  This doesn't directly constrain
+;;; the heap size, since the table is addressed modulo its size.
+#!+sb-sw-barrier
+(def!constant gencgc-card-count (ash 1 21))
+;;; The overflow area of the card table (in cards).  Small constant
+;;; offsets are precomputed away, but after the modulo computation, so
+;;; an overflow area must be left at the end of the table.
+#!+sb-sw-barrier
+(def!constant gencgc-overflow-card-count 64)
 ;;; The size in bytes of GENCGC cards, i.e. the granularity at which
 ;;; writes to old generations are logged.  With mprotect-based write
 ;;; barriers, this must be a multiple of the OS page size.
-(def!constant gencgc-card-bytes *backend-page-bytes*)
+(def!constant gencgc-card-bytes 4096)
 ;;; The minimum size of new allocation regions.  While it doesn't
 ;;; currently make a lot of sense to have a card size lower than
 ;;; the alloc granularity, it will, once we are smarter about finding
@@ -46,4 +55,4 @@
 (def!constant gencgc-alloc-granularity 0)
 ;;; The minimum size at which we release address ranges to the OS.
 ;;; This must be a multiple of the OS page size.
-(def!constant gencgc-release-granularity *backend-page-bytes*)
+(def!constant gencgc-release-granularity (ash 1 21))

@@ -27,11 +27,19 @@
          (value :scs (descriptor-reg any-reg)))
   (:info name offset lowtag)
   (:ignore name)
+  #!+sb-sw-barrier (:temporary (:sc descriptor-reg) temp)
+  (:results)
+  (:generator 1
+    (storew value object offset lowtag #!+sb-sw-barrier temp)))
+
+(define-vop (init-slot)
+  (:args (object :scs (descriptor-reg))
+         (value :scs (descriptor-reg any-reg)))
+  (:info name offset lowtag)
+  (:ignore name)
   (:results)
   (:generator 1
     (storew value object offset lowtag)))
-
-(define-vop (init-slot set-slot))
 
 #!+compare-and-swap-vops
 (define-vop (compare-and-swap-slot)
@@ -43,6 +51,8 @@
   (:ignore name)
   (:results (result :scs (descriptor-reg) :from :load))
   (:generator 5
+    #!+sb-sw-barrier
+    (emit-write-barrier temp new object offset lowtag)
     (inst sync)
     (inst li temp (- (* offset n-word-bytes) lowtag))
     LOOP
@@ -82,6 +92,8 @@
       (inst cmpwi result no-tls-value-marker-widetag)
       (inst bne CHECK-UNBOUND))
 
+    #!+sb-sw-barrier
+    (emit-write-barrier temp new symbol symbol-value-slot other-pointer-lowtag)
     (inst li temp (- (* symbol-value-slot n-word-bytes)
                      other-pointer-lowtag))
     LOOP
@@ -139,7 +151,7 @@
       (inst stwx value thread-base-tn tls-slot)
       (inst b DONE)
       GLOBAL-VALUE
-      (storew value symbol symbol-value-slot other-pointer-lowtag)
+      (storew value symbol symbol-value-slot other-pointer-lowtag temp)
       DONE))
 
   ;; With Symbol-Value, we check that the value isn't the trap object. So
@@ -267,7 +279,7 @@
       (inst lr lip  (make-fixup "closure_tramp" :foreign))
       (emit-label normal-fn)
       (storew lip fdefn fdefn-raw-addr-slot other-pointer-lowtag)
-      (storew function fdefn fdefn-fun-slot other-pointer-lowtag)
+      (storew function fdefn fdefn-fun-slot other-pointer-lowtag type)
       (move result function))))
 
 (define-vop (fdefn-makunbound)
@@ -356,7 +368,7 @@
     (inst addi bsp-tn bsp-tn (* 2 n-word-bytes))
     (storew temp bsp-tn (- binding-value-slot binding-size))
     (storew symbol bsp-tn (- binding-symbol-slot binding-size))
-    (storew val symbol symbol-value-slot other-pointer-lowtag)))
+    (storew val symbol symbol-value-slot other-pointer-lowtag temp)))
 
 #!+sb-thread
 (define-vop (unbind)
@@ -372,11 +384,11 @@
 
 #!-sb-thread
 (define-vop (unbind)
-  (:temporary (:scs (descriptor-reg)) symbol value)
+  (:temporary (:scs (descriptor-reg)) symbol value temp)
   (:generator 0
     (loadw symbol bsp-tn (- binding-symbol-slot binding-size))
     (loadw value bsp-tn (- binding-value-slot binding-size))
-    (storew value symbol symbol-value-slot other-pointer-lowtag)
+    (storew value symbol symbol-value-slot other-pointer-lowtag temp)
     (storew zero-tn bsp-tn (- binding-symbol-slot binding-size))
     (storew zero-tn bsp-tn (- binding-value-slot binding-size))
     (inst subi bsp-tn bsp-tn (* 2 n-word-bytes))))
@@ -385,7 +397,7 @@
 (define-vop (unbind-to-here)
   (:args (arg :scs (descriptor-reg any-reg) :target where))
   (:temporary (:scs (any-reg) :from (:argument 0)) where)
-  (:temporary (:scs (descriptor-reg)) symbol value)
+  (:temporary (:scs (descriptor-reg)) symbol value #!-sb-thread temp)
   (:generator 0
     (let ((loop (gen-label))
           (skip (gen-label))
@@ -404,7 +416,7 @@
       #!+sb-thread
       (inst stwx value thread-base-tn symbol)
       #!-sb-thread
-      (storew value symbol symbol-value-slot other-pointer-lowtag)
+      (storew value symbol symbol-value-slot other-pointer-lowtag temp)
       (storew zero-tn bsp-tn (- binding-symbol-slot binding-size))
 
       (emit-label skip)

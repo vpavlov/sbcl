@@ -40,7 +40,7 @@
              (let ((cons-cells (if star (1- num) num))
                    (stack-allocate-p (awhen (sb!c::node-lvar node)
                                        (sb!c::lvar-dynamic-extent it))))
-               (maybe-pseudo-atomic stack-allocate-p
+               (with-protected-allocation (stack-allocate-p)
                 (allocation res (* (pad-data-block cons-size) cons-cells) node
                             stack-allocate-p list-pointer-lowtag)
                 (move ptr res)
@@ -84,7 +84,7 @@
                               :disp (+ lowtag-mask
                                        (* vector-data-offset n-word-bytes))))
     (inst and result (lognot lowtag-mask))
-    (pseudo-atomic
+    (with-protected-allocation ()
       (allocation result result)
       (inst lea result (make-ea :byte :base result :disp other-pointer-lowtag))
       (storew type result 0 other-pointer-lowtag)
@@ -145,7 +145,7 @@
   (:results (result :scs (descriptor-reg)))
   (:node-var node)
   (:generator 10
-   (maybe-pseudo-atomic stack-allocate-p
+   (with-protected-allocation (stack-allocate-p)
     (let ((size (+ length closure-info-offset)))
       (allocation result (pad-data-block size) node stack-allocate-p
                   fun-pointer-lowtag)
@@ -186,7 +186,7 @@
   (:results (result :scs (descriptor-reg)))
   (:node-var node)
   (:generator 50
-    (maybe-pseudo-atomic stack-allocate-p
+    (with-protected-allocation (stack-allocate-p)
      (allocation result (pad-data-block words) node stack-allocate-p lowtag)
      (when type
        (storew (logior (ash (1- words) n-widetag-bits) type)
@@ -213,7 +213,7 @@
           (make-ea :qword :base header
                    :disp (+ (ash -2 n-widetag-bits) type)))
     (inst and bytes (lognot lowtag-mask))
-    (pseudo-atomic
+    (with-protected-allocation ()
      (allocation result bytes node)
      (inst lea result (make-ea :byte :base result :disp lowtag))
      (storew header result 0 lowtag))))

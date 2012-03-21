@@ -20,12 +20,14 @@
     `(unless (location= ,n-dst ,n-src)
        (inst mr ,n-dst ,n-src))))
 
-(macrolet
-    ((def (op inst shift)
-       `(defmacro ,op (object base &optional (offset 0) (lowtag 0))
-          `(inst ,',inst ,object ,base (- (ash ,offset ,,shift) ,lowtag)))))
-  (def loadw lwz word-shift)
-  (def storew stw word-shift))
+(defmacro loadw (value ptr &optional (slot 0) (lowtag 0))
+  `(inst lwz ,value ,ptr (- (ash ,slot word-shift) ,lowtag)))
+
+(defmacro storew (value ptr &optional (slot 0) (lowtag 0) barrier-tmp)
+  `(progn
+     ,(when barrier-tmp
+	    `(emit-write-barrier ,barrier-tmp ,value ,ptr ,slot ,lowtag))
+     (inst stw ,value ,ptr (- (ash ,slot word-shift) ,lowtag))))
 
 (defmacro load-symbol (reg symbol)
   `(inst addi ,reg null-tn (static-symbol-offset ,symbol)))
@@ -368,3 +370,36 @@ garbage collection.  This is currently implemented by disabling GC"
   #!+gencgc
   `(let ((*pinned-objects* (list* ,@objects *pinned-objects*)))
      ,@body))
+
+;;;; Software Write Barriers support
+
+(defvar *in-allocation* nil)
+
+#!-sb-sw-barrier
+(defun emit-write-barrier (temp value address-tn
+			   &optional (offset 0) (lowtag 0))
+  (declare (ignore temp value address-tn offset lowtag)))
+
+#!+sb-sw-barrier
+(defun emit-write-barrier (temp value address-tn
+			   &optional (offset 0) (lowtag 0))
+  (when (or *in-allocation*
+            (and (tn-p value)
+                 (or (sc-is value immediate)
+                     (memq (primitive-type-name
+                            (sb!c::tn-primitive-type value))
+                           '(character fixnum positive-fixnum single-float))))
+            (integerp value))
+    (return-from emit-write-barrier))
+  (let* ((offset          (- (* n-word-bytes offset) lowtag))
+         (card-offset     (truncate offset gencgc-card-bytes))
+         (safe-overflow-p (< card-offset gencgc-overflow-card-count))
+         (table           (make-fixup "gencgc_card_table" :foreign
+                                      (if safe-overflow-p card-offset 0)))
+         (temp            temp-reg-tn))
+    (if safe-overflow-p
+        (inst mov temp address-tn)
+        (inst lea temp (make-ea :qword :base address-tn :disp offset)))
+    (inst shr temp (integer-length (1- gencgc-card-bytes)))
+    (inst and temp (1- gencgc-card-count))
+    (inst mov (make-ea :byte :base temp :disp table) 1)))

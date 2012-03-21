@@ -101,6 +101,7 @@
   (:generator 4
      (if (sc-is value immediate)
          (let ((val (tn-value value)))
+           (emit-write-barrier value object (+ base offset) lowtag)
            (move-immediate (make-ea :qword :base object
                                     :disp (- (* (+ base offset) n-word-bytes)
                                              lowtag))
@@ -127,6 +128,7 @@
   (:results (result :scs (descriptor-reg)))
   (:info offset)
   (:generator 4
+    (emit-write-barrier new-value object (+ base offset) lowtag)
     (move eax old-value)
     (move temp new-value)
     (inst cmpxchg (make-ea :dword :base object

@@ -121,7 +121,7 @@
     (move eax data)
     (inst shl eax (- n-widetag-bits 2))
     (inst mov al-tn (make-ea :byte :base x :disp (- other-pointer-lowtag)))
-    (storew eax x 0 other-pointer-lowtag)
+    (storew eax x 0 other-pointer-lowtag nil)
     (move res x)))
 
 (define-vop (pointer-hash)
@@ -242,7 +242,7 @@
   (:generator 3
     (inst lea temp (make-ea-for-object-slot new-self simple-fun-code-offset
                                             fun-pointer-lowtag))
-    (storew temp function simple-fun-self-slot fun-pointer-lowtag)
+    (storew temp function simple-fun-self-slot fun-pointer-lowtag nil)
     (move result new-self)))
 
 ;;;; other miscellaneous VOPs
