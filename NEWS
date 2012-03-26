@@ -1,8 +1,13 @@
 ;;;; -*- coding: utf-8; fill-column: 78 -*-
 changes relative to sbcl-1.0.55:
+  * bug fix: fix copy-structure.  When copying from stack to heap, garbage
+    could end up in the heap making GC unhappy.
+    (Thanks to James Knight, lp#911027)
   * enhancements
     ** SBCL can now be built using Clang.
   * bug fix: compiler errors when weakening hairy integer types. (lp#913232)
+  * bug fix: don't complain about a too-hairy lexical environment for inlining
+    when the function has never been requested for inlining.  (lp#963530)
 
 changes in sbcl-1.0.55 relative to sbcl-1.0.54:
   * enhancements to building SBCL using make.sh:
