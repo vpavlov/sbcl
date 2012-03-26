@@ -3008,9 +3008,9 @@ verify_space(lispobj *start, size_t words)
 
             /* if both the containing page and the target page are
                in dynamic space, and if the containing page is
-	       write protected, the pointer SHOULD NOT point to
-	       an younger generation.
-	       This indicates write barrier failure.
+               write protected, the pointer SHOULD NOT point to
+               an younger generation.
+               This indicates write barrier failure.
             */
             if((home_page_index != -1) && (page_index != -1) &&
                page_table[home_page_index].write_protected &&
@@ -3866,10 +3866,10 @@ collect_garbage(generation_index_t last_gen)
 
     /* Verify wp pages for pointers to younger generations */
     if(pre_verify_gen_n) {
-	for(i=1;i<=PSEUDO_STATIC_GENERATION;i++) {
-	    FSHOW((stderr, "pre-checking generation %d\n", i));
-	    verify_generation(i);
-	}
+        for(i=1;i<=PSEUDO_STATIC_GENERATION;i++) {
+            FSHOW((stderr, "pre-checking generation %d\n", i));
+            verify_generation(i);
+        }
     }
 
     if (gencgc_verbose > 1)
