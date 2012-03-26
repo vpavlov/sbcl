@@ -111,6 +111,9 @@ generation_index_t verify_gens = HIGHEST_NORMAL_GENERATION + 1;
 /* Should we do a pre-scan verify of generation 0 before it's GCed? */
 boolean pre_verify_gen_0 = 0;
 
+/* Should we do a pre-scan verify other generations before GCed? */
+boolean pre_verify_gen_n = 1;
+
 /* Should we check for bad pointers after gc_free_heap is called
  * from Lisp PURIFY? */
 boolean verify_after_free_heap = 0;
@@ -2488,6 +2491,7 @@ update_page_write_prot(page_index_t page)
     return (wp_it);
 }
 
+
 /* Scavenge all generations from FROM to TO, inclusive, except for
  * new_space which needs special handling, as new objects may be
  * added which are not checked here - use scavenge_newspace generation.
@@ -2993,6 +2997,7 @@ verify_space(lispobj *start, size_t words)
         lispobj thing = *(lispobj*)start;
 
         if (is_lisp_pointer(thing)) {
+            page_index_t home_page_index = find_page_index((void*)start);
             page_index_t page_index = find_page_index((void*)thing);
             long to_readonly_space =
                 (READ_ONLY_SPACE_START <= thing &&
@@ -3000,6 +3005,19 @@ verify_space(lispobj *start, size_t words)
             long to_static_space =
                 (STATIC_SPACE_START <= thing &&
                  thing < SymbolValue(STATIC_SPACE_FREE_POINTER,0));
+
+            /* if both the containing page and the target page are
+               in dynamic space, and if the containing page is
+	       write protected, the pointer SHOULD NOT point to
+	       an younger generation.
+	       This indicates write barrier failure.
+            */
+            if((home_page_index != -1) && (page_index != -1) &&
+               page_table[home_page_index].write_protected &&
+               (page_table[home_page_index].gen > page_table[page_index].gen))
+            {
+                lose("Dangling pointer %p @ %p\n", thing, start);
+            }
 
             /* Does it point to the dynamic space? */
             if (page_index != -1) {
@@ -3844,6 +3862,14 @@ collect_garbage(generation_index_t last_gen)
     if (pre_verify_gen_0) {
         FSHOW((stderr, "pre-checking generation 0\n"));
         verify_generation(0);
+    }
+
+    /* Verify wp pages for pointers to younger generations */
+    if(pre_verify_gen_n) {
+	for(i=1;i<=PSEUDO_STATIC_GENERATION;i++) {
+	    FSHOW((stderr, "pre-checking generation %d\n", i));
+	    verify_generation(i);
+	}
     }
 
     if (gencgc_verbose > 1)

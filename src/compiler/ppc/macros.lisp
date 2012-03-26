@@ -26,7 +26,7 @@
 (defmacro storew (value ptr &optional (slot 0) (lowtag 0) barrier-tmp)
   `(progn
      ,(when barrier-tmp
-	    `(emit-write-barrier ,barrier-tmp ,value ,ptr ,slot ,lowtag))
+            `(emit-write-barrier ,barrier-tmp ,value ,ptr ,slot ,lowtag))
      (inst stw ,value ,ptr (- (ash ,slot word-shift) ,lowtag))))
 
 (defmacro load-symbol (reg symbol)
@@ -377,29 +377,36 @@ garbage collection.  This is currently implemented by disabling GC"
 
 #!-sb-sw-barrier
 (defun emit-write-barrier (temp value address-tn
-			   &optional (offset 0) (lowtag 0))
+                           &optional (offset 0) (lowtag 0))
   (declare (ignore temp value address-tn offset lowtag)))
 
 #!+sb-sw-barrier
 (defun emit-write-barrier (temp value address-tn
-			   &optional (offset 0) (lowtag 0))
+                           &optional (offset 0) (lowtag 0))
   (when (or *in-allocation*
             (and (tn-p value)
-                 (or (sc-is value immediate)
-                     (memq (primitive-type-name
-                            (sb!c::tn-primitive-type value))
-                           '(character fixnum positive-fixnum single-float))))
+                 (sc-is value immediate))
             (integerp value))
     (return-from emit-write-barrier))
-  (let* ((offset          (- (* n-word-bytes offset) lowtag))
-         (card-offset     (truncate offset gencgc-card-bytes))
-         (safe-overflow-p (< card-offset gencgc-overflow-card-count))
-         (table           (make-fixup "gencgc_card_table" :foreign
-                                      (if safe-overflow-p card-offset 0)))
-         (temp            temp-reg-tn))
-    (if safe-overflow-p
-        (inst mov temp address-tn)
-        (inst lea temp (make-ea :qword :base address-tn :disp offset)))
-    (inst shr temp (integer-length (1- gencgc-card-bytes)))
-    (inst and temp (1- gencgc-card-count))
-    (inst mov (make-ea :byte :base temp :disp table) 1)))
+  (let* ((offset      (- (* n-word-bytes offset) lowtag))
+         (table       (make-fixup "gencgc_card_table" :foreign)))
+    (inst lr temp offset)
+    (inst add temp temp address-tn)
+
+    ;; NOTE: this assumes that gencgc-card-count is 2^16
+    (inst srwi temp temp (integer-length (1- gencgc-card-bytes)))
+
+    (inst addis temp temp table)
+    (inst addi temp temp table)
+
+    ;; OK, this may look kind of wiered; we would like to store 1 here, but
+    ;; since we don't have a 'store immediate' instruction, we use the fact that
+    ;; null-tn register contains the descriptor for NIL, whose lsb includes
+    ;; a non-0 lowtag. The C code will have to check for ... != 0 instead of
+    ;; ... == 1, but this saves a couple of instructions here and is thus
+    ;; beneficial. The drawback is the above implicit dependency, plus another
+    ;; one on list-pointer-lowtag/other-pointer-lowtag NOT being 0,
+    ;; which should be OK.
+    ;; --VNP 2012-03-21
+
+    (inst stb null-tn temp 0)))

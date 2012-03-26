@@ -59,55 +59,55 @@
 
 ;;; Define some VOPs for indexed memory reference.
 (defmacro define-indexer (name write-p ri-op rr-op shift
-			  &optional sign-extend-byte)
-  (let ((barrier-p #!+sb-sw-barrier (and write-p (zerop shift 0))))
+                          &optional sign-extend-byte)
+  (let ((barrier-p #!+sb-sw-barrier (and write-p (zerop shift))))
     `(define-vop (,name)
        (:args (object :scs (descriptor-reg))
-	      (index :scs (any-reg zero immediate))
-	      ,@(when write-p '((value :scs (any-reg descriptor-reg)
-				 :target result))))
+              (index :scs (any-reg zero immediate))
+              ,@(when write-p '((value :scs (any-reg descriptor-reg)
+                                 :target result))))
        (:arg-types * tagged-num ,@(when write-p '(*)))
        (:temporary (:scs (non-descriptor-reg)) temp)
        ,@(when barrier-p '((:temporary (:scs (non-descriptor-reg)) temp2)))
        (:results (,(if write-p 'result 'value)
-		   :scs (any-reg descriptor-reg)))
+                   :scs (any-reg descriptor-reg)))
        (:result-types *)
        (:variant-vars offset lowtag)
        (:policy :fast-safe)
        (:generator
-	5
-	(sc-case index
-	  ((immediate zero)
-	   (let ((boffset (+ (if (sc-is index zero) 0 (tn-value index))
-			     offset))
-		 (offset (- (+ (if (sc-is index zero)
-				   0
-				   (ash (tn-value index)
-					(- word-shift ,shift)))
-			       (ash offset word-shift))
-			    lowtag)))
-	     ,@(when barrier-p
-		     `((emit-write-barrier temp value object boffset lowtag)))
-	     (etypecase offset
-	       ((signed-byte 16)
-		(inst ,ri-op value object offset))
-	       ((or (unsigned-byte 32) (signed-byte 32))
-		(inst lr temp offset)
-		(inst ,rr-op value object temp)))))
-	  (t
-	   ,@(when barrier-p
-		   `((progn
-		       (inst add temp2 object index)
-		       (emit-write-barrier temp value temp2 offset lowtag))))
-	   ,@(unless (zerop shift)
-		     `((inst srwi temp index ,shift)))
-	   (inst addi temp ,(if (zerop shift) 'index 'temp)
-		 (- (ash offset word-shift) lowtag))
-	   (inst ,rr-op value object temp)))
-	,@(when sign-extend-byte
-		`((inst extsb value value)))
-	,@(when write-p
-		'((move result value)))))))
+        5
+        (sc-case index
+          ((immediate zero)
+           (let (,@(when barrier-p `((boffset (+ (if (sc-is index zero) 0 (tn-value index))
+                             offset))))
+                 (offset (- (+ (if (sc-is index zero)
+                                   0
+                                   (ash (tn-value index)
+                                        (- word-shift ,shift)))
+                               (ash offset word-shift))
+                            lowtag)))
+             ,@(when barrier-p
+                     `((emit-write-barrier temp value object boffset lowtag)))
+             (etypecase offset
+               ((signed-byte 16)
+                (inst ,ri-op value object offset))
+               ((or (unsigned-byte 32) (signed-byte 32))
+                (inst lr temp offset)
+                (inst ,rr-op value object temp)))))
+          (t
+           ,@(when barrier-p
+                   `((progn
+                       (inst add temp2 object index)
+                       (emit-write-barrier temp value temp2 offset lowtag))))
+           ,@(unless (zerop shift)
+                     `((inst srwi temp index ,shift)))
+           (inst addi temp ,(if (zerop shift) 'index 'temp)
+                 (- (ash offset word-shift) lowtag))
+           (inst ,rr-op value object temp)))
+        ,@(when sign-extend-byte
+                `((inst extsb value value)))
+        ,@(when write-p
+                '((move result value)))))))
 
 (define-indexer word-index-ref nil lwz lwzx 0)
 (define-indexer word-index-set t stw stwx 0)
@@ -134,15 +134,16 @@
   (:generator 5
     (sc-case index
       ((immediate zero)
-       (let ((boffset (+ (if (sc-is index zero) 0 (tn-value index))
-			      offset))
-	     (offset (- (+ (if (sc-is index zero)
+       (let (#!+sb-sw-barrier
+             (boffset (+ (if (sc-is index zero) 0 (tn-value index))
+                         offset))
+             (offset (- (+ (if (sc-is index zero)
                                0
                              (ash (tn-value index) word-shift))
                            (ash offset word-shift))
                         lowtag)))
-	 #!+sb-sw-barrier
-	 (emit-write-barrier temp new-value object boffset lowtag)
+         #!+sb-sw-barrier
+         (emit-write-barrier temp new-value object boffset lowtag)
          (inst lr temp offset)))
       (t
 
