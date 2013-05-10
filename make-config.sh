@@ -350,6 +350,7 @@ case `uname -m` in
     parisc) guessed_sbcl_arch=hppa ;;
     9000/800) guessed_sbcl_arch=hppa ;;
     mips*) guessed_sbcl_arch=mips ;;
+    armv6l) guessed_sbcl_arch=arm ;;
     *)
         # If we're not building on a supported target architecture, we
         # we have no guess, but it's not an error yet, since maybe
@@ -444,6 +445,9 @@ case "$sbcl_os" in
 		;;
             ppc)
 		printf ' :sb-futex' >> $ltf
+		;;
+	    arm)
+		printf ' :sb-thread :sb-futex' >> $ltf
 		;;
         esac
 
@@ -664,6 +668,16 @@ elif [ "$sbcl_arch" = "hppa" ]; then
     printf ' :cheneygc' >> $ltf
     printf ' :stack-allocatable-vectors :stack-allocatable-fixed-objects' >> $ltf
     printf ' :stack-allocatable-lists' >> $ltf
+elif [ "$sbcl_arch" = "arm" ]; then
+    # FIXME: this is only preliminary at this point, copied from x86
+    # -- vnp 2013-05-10
+    printf ' :gencgc :stack-grows-downward-not-upward :c-stack-is-control-stack' >> $ltf
+    printf ' :compare-and-swap-vops :unwind-to-frame-and-call-vop :raw-instance-init-vops' >> $ltf
+    printf ' :stack-allocatable-closures :stack-allocatable-vectors' >> $ltf
+    printf ' :stack-allocatable-lists :stack-allocatable-fixed-objects' >> $ltf
+    printf ' :alien-callbacks :cycle-counter :inline-constants ' >> $ltf
+    printf ' :memory-barrier-vops :multiply-high-vops' >> $ltf
+    printf ' :linkage-table' >> $ltf
 else
     # Nothing need be done in this case, but sh syntax wants a placeholder.
     echo > /dev/null

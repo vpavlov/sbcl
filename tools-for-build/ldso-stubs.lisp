@@ -69,7 +69,7 @@ ldso_stub__~A: ;                                \\
 #endif
         .text"
 
-#!+(and (or x86 x86-64) (not darwin)) "
+#!+(and (or arm x86 x86-64) (not darwin)) "
 #define LDSO_STUBIFY(fct)                       \\
         .align 16 ;                             \\
 .globl ldso_stub__ ## fct ;                     \\
