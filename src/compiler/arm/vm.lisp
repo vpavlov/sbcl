@@ -38,24 +38,23 @@
                   (list ,@(mapcar #'(lambda (name)
                                       (symbolicate name "-OFFSET")) regs))))))
   ;; core registers
-  (defreg r0 0 :core)
-  (defreg r1 1 :core)
-  (defreg r2 2 :core)
-  (defreg r3 3 :core)
-  (defreg r4 4 :core)
-  (defreg r5 5 :core)
-  (defreg r6 6 :core)
-  (defreg r7 7 :core)
-  (defreg r8 8 :core)
-  (defreg r9 9 :core)
-  (defreg r10 10 :core)
-  (defreg r11 11 :core)
-  (defreg r12 12 :core)
-  (defregset *core-regs* r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12)
-
+  (defreg a1 0 :core)
+  (defreg a2 1 :core)
+  (defreg a3 2 :core)
+  (defreg a4 3 :core)
+  (defreg v1 4 :core)
+  (defreg v2 5 :core)
+  (defreg v3 6 :core)
+  (defreg v4 7 :core)
+  (defreg v5 8 :core)
+  (defreg thread 9 :core)
+  (defreg v7 10 :core)
+  (defreg v8 11 :core)
+  (defreg ip 12 :core)
   (defreg sp 13 :core)
   (defreg lr 14 :core)
   (defreg pc 15 :core)
+  (defregset *core-regs* a1 a2 a3 a4 v1 v2 v3 v4 v5 thread v7 v8 ip sp lr pc)
 
   ;; VFPv2, 16 doubleword registers view
   ;; TODO: figure out how to encode the other view, 32 singleword registers
@@ -84,8 +83,8 @@
   (def!constant register-arg-count 4)
   ;; names and offsets for registers used to pass arguments
   (eval-when (:compile-toplevel :load-toplevel :execute)
-    (defparameter *register-arg-names* '(r1 r2 r3 r4)))
-  (defregset *register-arg-offsets*  r1 r2 r3 r4))
+    (defparameter *register-arg-names* '(a1 a2 a3 a4)))
+  (defregset *register-arg-offsets*  a1 a2 a3 a4))
 
 ;;;; SB definitions
 
@@ -282,7 +281,7 @@
                                              :sc (sc-or-lose ',sc-name)
                                              :offset ,offset-name)))))
                `(progn ,@(forms)))))
-  (def-misc-reg-tns unsigned-reg r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 sp lr)
+  (def-misc-reg-tns unsigned-reg a1 a2 a3 a4 v1 v2 v3 v4 v5 v7 v8)
   (def-misc-reg-tns single-reg d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 d11
 		    d12 d13 d14 d15))
 
