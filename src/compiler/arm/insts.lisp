@@ -1,4 +1,4 @@
-;;;; the instruction set definition for the ARMv6/VFPv2
+;;;; the instruction set definition for the ARM
 
 ;;;; This software is part of the SBCL system. See the README file for
 ;;;; more information.
@@ -8,6 +8,7 @@
 ;;;; public domain. The software is in the public domain and is
 ;;;; provided with absolutely no warranty. See the COPYING and CREDITS
 ;;;; files for more information.
+
 (in-package "SB!VM")
 
 ;; Various helpers
@@ -96,31 +97,127 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
                           (type stream stream) (fixnum value))
                  (princ (format nil "#~d" (ror-immed12 value)) stream)))
 
-
-;;;; Primitive emitters.
+;; Shift types. However, there is a catch: 0 is either no shift or LSL,
+;; depending on whether the immed5 field is provided; also, 3 is either ROR or
+;; RRX based on the same thing. This is disambiguated using the immed5 prefilter
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *shift-types-alist*
+    '((:lsl . 0) (:lsr . 1) (:asr . 2) (:ror 3)))
+  (defparameter *shift-types-alist2* (append *shift-types-alist* '((:rrx 3)))))
 
+(defun shift-op-encoding (shift-op)
+  (cdr (assoc shift-op *shift-types-alist2* :test #'eq)))
+
+(sb!disassem:define-arg-type shift-op
+    :printer #'(lambda (value stream dstate)
+                 (declare (type stream stream) (type fixnum value))
+                 (let ((zero-immed5
+                        (sb!disassem:dstate-get-inst-prop dstate 'zero-immed5)))
+                   (cond
+                     ((and (= value 0) zero-immed5)) ;; noop
+                     ((and (= value 3) zero-immed5) (princ ", RRX" stream))
+                     (t (princ
+                         (format nil ", ~a"
+                                 (or (car (rassoc value *shift-types-alist*))
+                                     value))
+                         stream))))))
+
+;; 5-bit immediate field. Print #<value>
+;; The prefilter is used in order to signify to the shift-type printer that the
+;; immed5 value is zero. This will disambiguate some of the printer cases.
+(sb!disassem:define-arg-type immed5
+    :prefilter #'(lambda (value dstate)
+                   (when (= value 0)
+                     (sb!disassem:dstate-put-inst-prop dstate 'zero-immed5)))
+    :printer #'(lambda (value stream dstate)
+                 (declare (ignore dstate)
+                          (type stream stream) (fixnum value))
+                 (unless (= value 0)
+                   (princ (format nil "#~d" value) stream))))
+
+;;;; Emitters
+
+;;; Primitive emitters.
 (define-bitfield-emitter emit-word 32
   (byte 32 0))
 
-;; 
-;;;; Instruction formats and corresponding emitters
 
-(sb!disassem:define-instruction-format
-    (a521 32 :default-printer '(:name cnd :tab rd ", " rm))
-  (cnd :field (byte 4 28) :type 'cnd)
-  (rd :field (byte 4 12) :type 'reg)
-  (rm :field (byte 4 0) :type 'reg))
+;;; Data processing (immediate) instruction emitter
+;;; Template: 
+;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+(define-bitfield-emitter emit-dp-imm-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
 
-(define-bitfield-emitter emit-a521-inst 32
-  (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
-  (byte 4 12) (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
+
+;;; Data processing (register) instruction emitter 
+;;; Template:
+;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
+(define-bitfield-emitter emit-dp-reg-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
+  (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
+
+
+;;; Data processing (register) instruction emitter 
+;;; Template:
+;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
+(define-bitfield-emitter emit-dp-rsr-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
+  (byte 4 8) (byte 1 7) (byte 2 5) (byte 1 4) (byte 4 0))
+
 
 (define-bitfield-emitter emit-a523-inst 32
   (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
   (byte 4 12) (byte 12 0))
 ;; 
 ;;;; Instruction definitions
-	  
+
+;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
+;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
+(define-instruction eor (segment dst src &key src2 shift-op shift (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:dependencies (reads src1) (writes dst))
+  (:emitter
+   (let (src1)
+     (if src2
+	 (setf src1 src)
+	 (setf src1 dst src2 src))
+     (if shift-op
+	 (cond
+	   ;; third form
+	   ((register-p shift)
+	    (emit-dp-rsr-inst segment
+			      (cond-encoding cnd) #b00000010
+			      (reg-tn-encoding src1)
+			      (reg-tn-encoding dst)
+			      (reg-tn-encoding shift)
+			      #b0 (shift-op-encoding shift-op) #b1
+			      (reg-tn-encoding src2)))
+	   ;; second form
+	   ((integerp shift)
+	    (emit-dp-reg-inst segment
+			      (cond-encoding cnd) #b00000010
+			      (reg-tn-encoding src1)
+			      (reg-tn-encoding dst)
+			      shift (shift-op-encoding shift-op) #b0
+			      (reg-tn-encoding src2)))
+	   (t
+	    (error "Bad instruction!")))
+	 ;; first form
+	 (if (register-p src2)
+	     (emit-dp-reg-inst segment
+			       (cond-encoding cnd) #b00000010
+			       (reg-tn-encoding src1)
+			       (reg-tn-encoding dst)
+			       #b00000 #b00 #b0
+			       (reg-tn-encoding src2))
+	     (emit-dp-imm-inst segment
+			       (cond-encoding cnd) #b00100010
+			       (reg-tn-encoding src1)
+			       (reg-tn-encoding dst)
+			       (immed12-encoding src2)))))))
+  
 (define-instruction mov (segment dst src &key (cnd :al))
   (:delay 1)
   (:cost 1)
@@ -128,8 +225,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (:emitter
    (if (register-p src)
        ;; register to register
-       (emit-a521-inst segment (cond-encoding cnd)
-		       #b000 #b11010 #b0000
+       (emit-dp-reg-inst segment (cond-encoding cnd)
+		       #b00011010 #b0000
 		       (reg-tn-encoding dst)
 		       #b00000 #b00 #b0
 		       (reg-tn-encoding src))
@@ -163,8 +260,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
            (define-a5212-instruction (name op1 op2)
              `(define-instruction ,name (segment rm &key (cnd :al))
                 (:emitter
-                 (emit-a521-inst segment (cond-encoding cnd)
-				 #b000 #b10010 #b1111 #b1111 #b11110
+                 (emit-dp-reg-inst segment (cond-encoding cnd)
+				 #b00010010 #b1111 #b1111 #b11110
 				 ,op1 ,op2 (reg-tn-encoding rm)))))
            )
   (define-a5212-instruction bx  #b00 #b1)
@@ -208,45 +305,9 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   `(%lr ,reg ,value))
 
 
-;; ;; 5-bit immediate field. Print #<value>
-;; ;; The prefilter is used in order to signify to the shift-type printer that the
-;; ;; immed5 value is zero. This will disambiguate some of the printer cases.
-;; (sb!disassem:define-arg-type immed5
-;;     :prefilter #'(lambda (value dstate)
-;;                    (when (= value 0)
-;;                      (sb!disassem:dstate-put-inst-prop dstate 'zero-immed5)))
-;;     :printer #'(lambda (value stream dstate)
-;;                  (declare (ignore dstate)
-;;                           (type stream stream) (fixnum value))
-;;                  (unless (= value 0)
-;;                    (princ (format nil "#~d" value) stream))))
 
 
 
-;; ;; Shift types. However, there is a catch: 0 is either no shift or LSL,
-;; ;; depending on whether the immed5 field is provided; also, 3 is either ROR or
-;; ;; RRX based on the same thing. This is disambiguated using the immed5 prefilter
-;; (eval-when (:compile-toplevel :load-toplevel :execute)
-;;   (defparameter *shift-types-alist*
-;;     '((:lsl . 0) (:lsr . 1) (:asr . 2) (:ror 3)))
-;;   (defparameter *shift-types-alist2* (append *shift-types-alist* '((:rrx 3)))))
-
-;; (defun type-opcode (type)
-;;   (cdr (assoc type *shift-types-alist2* :test #'eq)))
-
-;; (sb!disassem:define-arg-type shift-type
-;;     :printer #'(lambda (value stream dstate)
-;;                  (declare (type stream stream) (type fixnum value))
-;;                  (let ((zero-immed5
-;;                         (sb!disassem:dstate-get-inst-prop dstate 'zero-immed5)))
-;;                    (cond
-;;                      ((and (= value 0) zero-immed5)) ;; noop
-;;                      ((and (= value 3) zero-immed5) (princ ", RRX" stream))
-;;                      (t (princ
-;;                          (format nil ", ~a"
-;;                                  (or (car (rassoc value *shift-types-alist*))
-;;                                      value))
-;;                          stream))))))
 ;; 
 ;; ;;; Instruction formats and corresponding emitters
 

@@ -37,19 +37,8 @@
 
 (!def-vm-support-routine generate-return-sequence (style)
   (ecase style
-    (:raw
+    ((:raw :full-call)
      `((inst bx (make-random-tn :kind :normal
 				:sc (sc-or-lose 'interior-reg)
-				:offset lr-offset)))
-    (:full-call
-     `((lisp-return (make-random-tn :kind :normal
-				    :sc (sc-or-lose 'descriptor-reg )
-				    :offset lra-offset)
-		    (make-random-tn :kind :normal
-				    :sc (sc-or-lose 'interior-reg )
-				    :offset lip-offset)
-		    :offset 2)))
+				:offset lr-offset))))
     (:none)))
-
-(defun return-machine-address (scp)
-  (sap-int (context-lr scp)))
