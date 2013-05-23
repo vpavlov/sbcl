@@ -142,13 +142,6 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (byte 32 0))
 
 
-;;; Data processing (immediate) instruction emitter
-;;; Template: 
-;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
-(define-bitfield-emitter emit-dp-imm-inst 32
-  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
-
-
 ;;; Data processing (register) instruction emitter 
 ;;; Template:
 ;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
@@ -156,13 +149,21 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
   (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
 
-
-;;; Data processing (register) instruction emitter 
+;;; Data processing (register-shifter register) instruction emitter 
 ;;; Template:
 ;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
 (define-bitfield-emitter emit-dp-rsr-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
   (byte 4 8) (byte 1 7) (byte 2 5) (byte 1 4) (byte 4 0))
+
+;;; Data processing (immediate) instruction emitter
+;;; Template: 
+;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+(define-bitfield-emitter emit-dp-imm-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
+
+
+
 
 
 (define-bitfield-emitter emit-a523-inst 32
@@ -298,6 +299,36 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 
 ;;;
 ;;; End of A5.2.1, A5.2.2 and A5.2.3
+;;;=============================================================================
+
+
+;;;=============================================================================
+;;; A5.3 Load/store word and unsigned byte
+;;; CCCC|01A|op1  |Rn  |...........|B|....|
+;;; CCCC|010|PU0W0|Rn  |Rt  |immed12..... | - STR Rt, [Rn, #immed]
+;;; CCCC|011|PU0W0|Rn  |Rt  |
+(define-instruction str (src base offset &key (cnd :al) index wback)
+  (:declare (type (integer -4096 4096) offset))
+  (:delay 1)
+  (:cost 1)
+  (:dependencies (reads src) (reads base) (writes :memory))
+  (:emitter
+   (let ((fld #b01000000)
+	 (add nil))
+     (if (>= offset 0)
+	 (setf add t)
+	 (setf offset (- offset)))
+     (when index (setf fld (logior fld #b00010000)))
+     (when add   (setf fld (logior fld #b00001000)))
+     (when wback (setf fld (logior fld #b00000010)))
+     (emit-dp-imm-inst segment (cond-encoding cnd) fld
+		       (reg-tn-encoding base)
+		       (reg-tn-encoding src)
+		       offset))))
+     
+     
+
+;;; End of A5.3
 ;;;=============================================================================
 
 
