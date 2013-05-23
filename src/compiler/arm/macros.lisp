@@ -19,3 +19,15 @@
               (n-src src))
     `(unless (location= ,n-dst ,n-src)
        (inst mov ,n-dst ,n-src))))
+
+;; POSSIBLE FIXME: Current implementation of loadw/storew uses plain ldr/str
+;;        instructions whose limit for the offset is +/-4096. The ppc backend
+;;        uses lwz/stw whose limit is +/-32,768 (more precisely signed 16-bit
+;;        value). Thus, in case we need to reach farther than 4096, we have
+;;        implement some hairy thing.
+;;        --VNP 2013-05-23
+(macrolet ((def (op inst)
+	     `(defmacro ,op (dst src &optional (slot 0) (lowtag 0))
+		`(inst ,',inst ,dst ,src (- (* ,slot n-word-bytes) ,lowtag)))))
+  (def loadw ldr)
+  (def storew str))

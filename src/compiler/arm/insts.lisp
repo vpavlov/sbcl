@@ -44,7 +44,7 @@
 (sb!disassem:define-arg-type reg
     :printer #'(lambda (value stream dstate)
                  (declare (type stream stream) (fixnum value))
-                 (let ((regname (aref *core-register-names* value)))
+                 (let ((regname (aref *register-names* value)))
                    (princ regname stream)
                    (sb!disassem:maybe-note-associated-storage-ref
                     value 'registers regname dstate))))
@@ -171,70 +171,135 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;; 
 ;;;; Instruction definitions
 
-;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+
+;;;=============================================================================
+;;; A5.2.1. Data Processing (register)
+;;; A5.2.2. Data Processing (register-shifted register)
+;;; A5.2.3. Data Processing (immediate)
+;;;
 ;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
 ;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
-(define-instruction eor (segment dst src &key src2 shift-op shift (cnd :al))
-  (:delay 1)
-  (:cost 1)
-  (:dependencies (reads src1) (writes dst))
-  (:emitter
-   (let (src1)
-     (if src2
-	 (setf src1 src)
-	 (setf src1 dst src2 src))
-     (if shift-op
-	 (cond
-	   ;; third form
-	   ((register-p shift)
-	    (emit-dp-rsr-inst segment
-			      (cond-encoding cnd) #b00000010
-			      (reg-tn-encoding src1)
-			      (reg-tn-encoding dst)
-			      (reg-tn-encoding shift)
-			      #b0 (shift-op-encoding shift-op) #b1
-			      (reg-tn-encoding src2)))
-	   ;; second form
-	   ((integerp shift)
-	    (emit-dp-reg-inst segment
-			      (cond-encoding cnd) #b00000010
-			      (reg-tn-encoding src1)
-			      (reg-tn-encoding dst)
-			      shift (shift-op-encoding shift-op) #b0
-			      (reg-tn-encoding src2)))
-	   (t
-	    (error "Bad instruction!")))
-	 ;; first form
-	 (if (register-p src2)
-	     (emit-dp-reg-inst segment
-			       (cond-encoding cnd) #b00000010
-			       (reg-tn-encoding src1)
-			       (reg-tn-encoding dst)
-			       #b00000 #b00 #b0
-			       (reg-tn-encoding src2))
-	     (emit-dp-imm-inst segment
-			       (cond-encoding cnd) #b00100010
-			       (reg-tn-encoding src1)
-			       (reg-tn-encoding dst)
-			       (immed12-encoding src2)))))))
-  
-(define-instruction mov (segment dst src &key (cnd :al))
-  (:delay 1)
-  (:cost 1)
-  (:dependencies (reads src) (writes dst))
-  (:emitter
-   (if (register-p src)
-       ;; register to register
-       (emit-dp-reg-inst segment (cond-encoding cnd)
-		       #b00011010 #b0000
-		       (reg-tn-encoding dst)
-		       #b00000 #b00 #b0
-		       (reg-tn-encoding src))
-       ;; immediate to register
-       (emit-a523-inst segment (cond-encoding cnd)
-		       #b001 #b11010 #b0000
-		       (reg-tn-encoding dst)
-		       (immed12-encoding src)))))
+;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+(macrolet ((define-dp-instruction (name op)
+	     `(define-instruction ,name (segment dst src &key (cnd :al)
+						 src2 shift shift-op)
+		(:delay 1)
+		(:cost 1)
+		(:dependencies (reads src) (writes dst))
+		(:emitter
+		 (let ((fld ,op)
+		       src1)
+		   (if src2
+		       (setf src1 src)
+		       (setf src1 dst src2 src))
+		   (if shift-op
+		       (cond
+			 ;; first form (register)
+			 ((integerp shift)
+			  (emit-dp-reg-inst segment
+					    (cond-encoding cnd) ,fld
+					    (reg-tn-encoding src1)
+					    (reg-tn-encoding dst)
+					    shift
+					    (shift-op-encoding shift-op) #b0
+					    (reg-tn-encoding src2)))
+			 ;; second form (register-shifted register)
+			 ((register-p shift)
+			  (emit-dp-rsr-inst segment
+					    (cond-encoding cnd) ,fld
+					    (reg-tn-encoding src1)
+					    (reg-tn-encoding dst)
+					    (reg-tn-encoding shift)
+					    #b0 (shift-op-encoding shift-op) #b1
+					    (reg-tn-encoding src2)))
+			 (t
+			  (error "Bad shift operand in ~a!" ,name)))
+		       (if (register-p src2)
+			   ;; first form (register, special case of 0 shift)
+			   (emit-dp-reg-inst segment
+					     (cond-encoding cnd) ,fld
+					     (reg-tn-encoding src1)
+					     (reg-tn-encoding dst)
+					     #b00000 #b00 #b0
+					     (reg-tn-encoding src2))
+			   ;; third form (immediate)
+			   (emit-dp-imm-inst segment
+					     (cond-encoding cnd)
+					     (logior #b100000 ,fld)
+					     (reg-tn-encoding src1)
+					     (reg-tn-encoding dst)
+					     (immed12-encoding src2)))))))))
+  (define-dp-instruction and   #b00000000)
+  (define-dp-instruction ands  #b00000001)
+  (define-dp-instruction eor   #b00000010)
+  (define-dp-instruction eors  #b00000011)
+  (define-dp-instruction sub   #b00000100)
+  (define-dp-instruction subs  #b00000101)
+  (define-dp-instruction rsb   #b00000110)
+  (define-dp-instruction rsbs  #b00000111)
+  (define-dp-instruction add   #b00001000)
+  (define-dp-instruction adds  #b00001001)
+  (define-dp-instruction adc   #b00001010)
+  (define-dp-instruction adcs  #b00001011)
+  (define-dp-instruction sbc   #b00001100)
+  (define-dp-instruction sbcs  #b00001101)
+  (define-dp-instruction rsc   #b00001110)
+  (define-dp-instruction rscs  #b00001111)
+  ;; --- these don't have non-S variants, since all they do is set flags
+  (define-dp-instruction tst   #b00010001)
+  (define-dp-instruction teq   #b00010011)
+  (define-dp-instruction cmp   #b00010101)
+  (define-dp-instruction cmn   #b00010111)
+  ;; ---
+  (define-dp-instruction orr   #b00011000)
+  (define-dp-instruction orrs  #b00011001)
+  (define-dp-instruction %mov  #b00011010)
+  (define-dp-instruction %movs #b00011011)
+  (define-dp-instruction bic   #b00011100)
+  (define-dp-instruction bics  #b00011101)
+  (define-dp-instruction mvn   #b00011110)
+  (define-dp-instruction mvns  #b00011111)
+  )
+
+;; Instructions based on the %MOV/%MOVS templates with special values for he
+;; shifter and operands.
+(macrolet ((mov-frob (name base)
+	     `(define-instruction-macro ,name (dst src &key (cnd :al))
+		`(inst ,,base ,dst (make-random-tn :kind :normal
+						   :sc (sc-or-lose 'any-reg)
+						   :offset 0)
+		       :cnd ,cnd
+		       :src2 ,src)))
+	   (shift-frob (name base shift-op)
+	     `(define-instruction-macro ,name (dst src shift &key (cnd :al))
+		`(inst ,,base ,dst (make-random-tn :kind :normal
+						   :sc (sc-or-lose 'any-reg)
+						   :offset 0)
+		       :cnd ,cnd
+		       :src2 ,src
+		       :shift-op ,,shift-op
+		       :shift ,shift))))
+  (mov-frob   mov  %mov)
+  (mov-frob   movs %movs)
+  (shift-frob lsl  %mov  :lsl)
+  (shift-frob lsls %movs :lsl)
+  (shift-frob lsr  %mov  :lsr)
+  (shift-frob lsrs %movs :lsr)
+  (shift-frob asr  %mov  :asr)
+  (shift-frob asrs %movs :asr)
+  (shift-frob ror  %mov  :ror)
+  (shift-frob rors %movs :ror))
+
+(define-instruction-macro rrx (dst src &key (cnd :al))
+  `(inst ror ,dst ,src 0 :cnd ,cnd))
+
+(define-instruction-macro rrxs (dst src &key (cnd :al))
+  `(inst rors ,dst ,src 0 :cnd ,cnd))
+
+;;;
+;;; End of A5.2.1, A5.2.2 and A5.2.3
+;;;=============================================================================
+
 
 (macrolet ((frob (name fx op)
 	     `(define-instruction ,name (segment dst src &key (cnd :al))
@@ -311,16 +376,6 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;; 
 ;; ;;; Instruction formats and corresponding emitters
 
-;; (define-bitfield-emitter emit-a521-inst 32
-;;   (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
-;;   (byte 4 12) (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a522-inst 32
-;;   (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
-;;   (byte 4 12) (byte 4 8) (byte 1 7) (byte 2 5) (byte 1 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a523-inst 32
-;;   (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16) (byte 4 12) (byte 12 0))
 
 ;; (define-bitfield-emitter emit-a525-inst 32
 ;;   (byte 4 28) (byte 4 24) (byte 4 20) (byte 4 16) (byte 4 12)
@@ -343,109 +398,6 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 
 ;; (define-bitfield-emitter emit-a5212-inst 32
 ;;   (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
-;; 
-;; ;;; Instruction definitions
-
-
-;; ;; A5.2.1, A5.2.2 and A5.2.3 Data processing (register, register-shifter
-;; ;; register and immediate) -- 38 insts
-;; (macrolet (
-;;            ;; instructions like:
-;;            ;; AND Rd, Rn, Rm LSL #5 (A5.2.1)
-;;            ;; AND Rd, Rn, Rm LSL Rs (A5.2.2)
-;;            ;; AND Rd, Rn, #const    (A5.2.3)
-;;            (define-a521/2/3-instruction (name op1)
-;;              `(define-instruction ,name (segment cnd rd rn rm-or-imm12
-;;                                                  &optional (type 0)
-;;                                                  (rs-or-imm5 0))
-;;                 (:emitter
-;;                  ;; TODO: unbox immed values
-;;                  (if (typep rm-or-imm12 'tn)
-;;                      (if (typep rs-or-imm5 'tn)
-;;                          (emit-a522-inst segment (conditional-opcode cnd)
-;;                                          #b000 ,op1 (reg-encode rn)
-;;                                          (reg-encode rd)
-;;                                          (reg-encode rs-or-imm5) #b0
-;;                                          (type-opcode type) #b1
-;;                                          (reg-encode rm-or-imm12))
-;;                          (emit-a521-inst segment (conditional-opcode cnd)
-;;                                          #b000 ,op1 (reg-encode rn)
-;;                                          (reg-encode rd) rs-or-imm5
-;;                                          (type-opcode type) #b0
-;;                                          (reg-encode rm-or-imm12)))
-;;                      (emit-a523-inst segment (conditional-opcode cnd)
-;;                                      #b001 ,op1 (reg-encode rn)
-;;                                      (reg-encode rd)
-;;                                      rm-or-imm12)))))
-
-;;            ;; MOV Rd, Rm
-;;            ;; RRX Rd, Rm
-;;            (define-a521-subtype2-instruction (name op1 op3)
-;;              `(define-instruction ,name (segment cnd rd rm)
-;;                 (:emitter (emit-a521-inst segment (conditional-opcode cnd)
-;;                                           #b000 ,op1 #b0000
-;;                                           (reg-encode rd) #b00000
-;;                                           ,op3 #b0
-;;                                           (reg-encode rm)))))
-
-;;            ;; instructions like:
-;;            ;; LSL Rd, Rm, #const (A5.2.1)
-;;            ;; LSL Rd, Rm, Rs     (A5.2.2)
-;;            (define-a521/2-subtype3-instruction (name op1 op3)
-;;              `(define-instruction ,name (segment cnd rd rm rs-or-imm5)
-;;                 (:emitter
-;;                  ;; TODO: unbox immed values
-;;                  (if (typep rs-or-imm5 'tn)
-;;                      (emit-a522-inst segment (conditional-opcode cnd)
-;;                                      #b000 ,op1 #b0000
-;;                                      (reg-encode rd)
-;;                                      (reg-encode rs-or-imm5) #b0
-;;                                      ,op3 #b1
-;;                                      (reg-encode rm))
-;;                      (emit-a521-inst segment (conditional-opcode cnd)
-;;                                      #b000 ,op1 #b0000
-;;                                      (reg-encode rd) rs-or-imm5
-;;                                      ,op3 #b0
-;;                                      (reg-encode rm))))))
-;;            )
-;;   (define-a521/2/3-instruction        and  #b00000)
-;;   (define-a521/2/3-instruction        ands #b00001)
-;;   (define-a521/2/3-instruction        eor  #b00010)
-;;   (define-a521/2/3-instruction        eors #b00011)
-;;   (define-a521/2/3-instruction        sub  #b00100)
-;;   (define-a521/2/3-instruction        subs #b00101)
-;;   (define-a521/2/3-instruction        rsb  #b00110)
-;;   (define-a521/2/3-instruction        rsbs #b00111)
-;;   (define-a521/2/3-instruction        add  #b01000)
-;;   (define-a521/2/3-instruction        adds #b01001)
-;;   (define-a521/2/3-instruction        adc  #b01010)
-;;   (define-a521/2/3-instruction        adcs #b01011)
-;;   (define-a521/2/3-instruction        sbc  #b01100)
-;;   (define-a521/2/3-instruction        sbcs #b01101)
-;;   (define-a521/2/3-instruction        rsc  #b01110)
-;;   (define-a521/2/3-instruction        rscs #b01111)
-;;   (define-a521/2/3-instruction        tst  #b10001)
-;;   (define-a521/2/3-instruction        teq  #b10011)
-;;   (define-a521/2/3-instruction        cmp  #b10101)
-;;   (define-a521/2/3-instruction        cmn  #b10111)
-;;   (define-a521/2/3-instruction        orr  #b11000)
-;;   (define-a521/2/3-instruction        orrs #b11001)
-;;   (define-a521-subtype2-instruction   mov  #b11010 #b00)
-;;   (define-a521-subtype2-instruction   movs #b11011 #b00)
-;;   (define-a521/2-subtype3-instruction lsl  #b11010 #b00)
-;;   (define-a521/2-subtype3-instruction lsls #b11011 #b00)
-;;   (define-a521/2-subtype3-instruction lsr  #b11010 #b01)
-;;   (define-a521/2-subtype3-instruction lsrs #b11011 #b01)
-;;   (define-a521/2-subtype3-instruction asr  #b11010 #b10)
-;;   (define-a521/2-subtype3-instruction asrs #b11011 #b10)
-;;   (define-a521-subtype2-instruction   rrx  #b11010 #b11)
-;;   (define-a521-subtype2-instruction   rrxs #b11011 #b11)
-;;   (define-a521/2-subtype3-instruction ror  #b11010 #b11)
-;;   (define-a521/2-subtype3-instruction rors #b11011 #b11)
-;;   (define-a521/2/3-instruction        bic  #b11100)
-;;   (define-a521/2/3-instruction        bics #b11101)
-;;   (define-a521/2/3-instruction        mvn  #b11110)
-;;   (define-a521/2/3-instruction        mvns #b11111))
  
 
 
