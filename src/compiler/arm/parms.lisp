@@ -47,3 +47,83 @@
 
 (def!constant double-float-digits
   (+ (byte-size double-float-significand-byte) n-word-bits 1))
+
+;;;; description of the target address space
+
+;;; where to put the different spaces
+;;;
+;;; Note: Mostly these values are black magic. For now we copy them from the
+;;;       X86 port.
+#!+linux (!gencgc-space-setup #x01000000 #x09000000)
+
+;;; Size of one linkage-table entry in bytes.
+(def!constant linkage-table-entry-size 8)
+
+;;;; static symbols
+
+;;; These symbols are loaded into static space directly after NIL so
+;;; that the system can compute their address by adding a constant
+;;; amount to NIL.
+;;;
+;;; The fdefn objects for the static functions are loaded into static
+;;; space directly after the static symbols. That way, the raw-addr
+;;; can be loaded directly out of them by indirecting relative to NIL.
+;;;
+;;; pfw X86 doesn't have enough registers to keep these things there.
+;;;     Note these spaces grow from low to high addresses.
+(defvar *allocation-pointer*)
+(defvar *binding-stack-pointer*)
+
+(defparameter *static-symbols*
+  (append
+   *common-static-symbols*
+   *c-callable-static-symbols*
+   '(*alien-stack*
+
+     ;; interrupt handling
+     *pseudo-atomic-bits*
+
+     *allocation-pointer*
+     *binding-stack-pointer*
+
+     ;; the floating point constants
+     *fp-constant-0d0*
+     *fp-constant-1d0*
+     *fp-constant-0f0*
+     *fp-constant-1f0*
+     ;; The following are all long-floats.
+     *fp-constant-0l0*
+     *fp-constant-1l0*
+     *fp-constant-pi*
+     *fp-constant-l2t*
+     *fp-constant-l2e*
+     *fp-constant-lg2*
+     *fp-constant-ln2*
+
+     ;; For GC-AND-SAVE
+     *restart-lisp-function*
+
+     ;; Needed for callbacks to work across saving cores. see
+     ;; ALIEN-CALLBACK-ASSEMBLER-WRAPPER in c-call.lisp for gory
+     ;; details.
+     sb!alien::*enter-alien-callback*
+
+     ;; see comments in ../x86-64/parms.lisp
+     sb!pcl::..slot-unbound..)))
+
+(defparameter *static-funs*
+  '(length
+    sb!kernel:two-arg-+
+    sb!kernel:two-arg--
+    sb!kernel:two-arg-*
+    sb!kernel:two-arg-/
+    sb!kernel:two-arg-<
+    sb!kernel:two-arg->
+    sb!kernel:two-arg-=
+    eql
+    sb!kernel:%negate
+    sb!kernel:two-arg-and
+    sb!kernel:two-arg-ior
+    sb!kernel:two-arg-xor
+    sb!kernel:two-arg-gcd
+    sb!kernel:two-arg-lcm))
