@@ -57,7 +57,7 @@
   ;; system. So (KLUDGE):
   #-sb-xc-host (sb!sys:%primitive print "/can't /SHOW:")
   #-sb-xc-host (sb!sys:%primitive print string)
-  (values))
+  #-sb-xc-host (values))
 
 ;;; Should /SHOW output be suppressed at this point?
 ;;;

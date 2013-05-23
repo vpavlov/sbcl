@@ -254,7 +254,7 @@
                    #!+mips "mips"
                    #!+alpha "alpha"
                    #!+hppa "hppa"
-		   #!+arm "arm"
+                   #!+arm "arm"
                    (subseq stem (+ position 7)))
       stem)))
 (compile 'stem-remap-target)
