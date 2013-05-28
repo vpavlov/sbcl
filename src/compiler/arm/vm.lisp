@@ -17,12 +17,12 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *register-names* (make-array 16 :initial-element nil)))
 
-(macrolet ((defreg (name offset nmspace)
+(macrolet ((defreg (name offset)
              (let ((offset-sym (symbolicate name "-OFFSET")))
-	       `(eval-when (:compile-toplevel :load-toplevel :execute)
-		  (def!constant ,offset-sym ,offset)
+               `(eval-when (:compile-toplevel :load-toplevel :execute)
+                  (def!constant ,offset-sym ,offset)
                   (setf (svref *register-names* ,offset-sym)
-			,(symbol-name name)))))
+                        ,(symbol-name name)))))
            (defregset (name &rest regs)
              `(eval-when (:compile-toplevel :load-toplevel :execute)
                 (defparameter ,name
@@ -39,12 +39,12 @@
   (defreg v5 8)
   (defreg thread 9)
   (defreg v7 10)
-  (defreg v8 11)
-  (defreg ip 12)
+  (defreg null 11)
+  (defreg lip 12)
   (defreg sp 13)
   (defreg lr 14)
   (defreg pc 15)
-  (defregset descriptor-regs a1 a2 a3 a4 v1 v2 v3 v4 v5 v7 v8)
+  (defregset descriptor-regs a1 a2 a3 a4 v1 v2 v3 v4 v5 v7)
 
   (defregset *register-arg-offsets* a1 a2 a3 a4)
   (defparameter register-arg-names '(a1 a2 a3 a4)))
@@ -52,7 +52,7 @@
 ;;;; SB definitions
 
 (define-storage-base registers :finite :size 16)
-(define-storage-base float-registers :finite :size 16)
+(define-storage-base float-registers :finite :size 32)
 (define-storage-base stack :unbounded :size 8)
 (define-storage-base constant :non-packed)
 (define-storage-base immediate-constant :non-packed)
@@ -102,6 +102,9 @@
   ;; non-immediate constants in the constant pool
   (constant constant)
 
+  ;; NIL is in register
+  (null immediate-constant)
+
   ;; Anything else that can be an immediate.
   (immediate immediate-constant)
 
@@ -119,10 +122,10 @@
   (sap-stack stack)                     ; System area pointers.
   (single-stack stack)                  ; single-floats
   (double-stack stack
-		:element-size 2 :alignment 2)  ; double-floats.
+                :element-size 2 :alignment 2)  ; double-floats.
   (complex-single-stack stack :element-size 2)  ; complex-single-floats
   (complex-double-stack stack
-			:element-size 4 :alignment 2)  ; complex-double-floats
+                        :element-size 4 :alignment 2)  ; complex-double-floats
 
   ;;
   ;; things that can go in the integer registers
@@ -146,7 +149,7 @@
   (descriptor-reg
    registers
    :locations #.descriptor-regs
-   :constant-scs (constant immediate)
+   :constant-scs (constant null immediate)
    :save-p t
    :alternate-scs (control-stack))
 
@@ -180,7 +183,11 @@
    :constant-scs (immediate)
    :save-p t
    :alternate-scs (unsigned-stack))
-  
+
+  ;; Pointers to the interior of objects.  Used only as a temporary.
+  (interior-reg registers
+   :locations (#.lip-offset))
+
   ;; non-descriptor SINGLE-FLOATs
   (single-reg
    float-registers
@@ -229,6 +236,8 @@
                    (make-random-tn :kind :normal
                     :sc (sc-or-lose ',sc)
                     :offset ,offset-sym)))))
+  (defregtn lip interior-reg)
+  (defregtn null descriptor-reg)
   (defregtn sp any-reg))
 
 ;;; If value can be represented as an immediate constant, then return
@@ -236,6 +245,8 @@
 (!def-vm-support-routine
  immediate-constant-sc (value)
  (typecase value
+   (null
+    (sc-number-or-lose 'null))
    ((or (integer #.sb!xc:most-negative-fixnum #.sb!xc:most-positive-fixnum)
         character)
     (sc-number-or-lose 'immediate))
@@ -245,14 +256,15 @@
 
 (!def-vm-support-routine
  boxed-immediate-sc-p (sc)
- (eql sc (sc-number-or-lose 'immediate)))
+ (or (eql sc (sc-number-or-lose 'null))
+     (eql sc (sc-number-or-lose 'immediate))))
 
 ;;;; function call parameters
 
 ;;; the SC numbers for register and stack arguments/return values
 (def!constant register-arg-scn (meta-sc-number-or-lose 'descriptor-reg))
 (def!constant immediate-arg-scn (meta-sc-number-or-lose 'any-reg))
-(def!constant control-stack-arg-scn (meta-sc-number-or-lose 'stack))
+(def!constant control-stack-arg-scn (meta-sc-number-or-lose 'control-stack))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
@@ -260,7 +272,7 @@
   (def!constant ocfp-save-offset 0)
   (def!constant lra-save-offset 1)
   (def!constant nfp-save-offset 2)
-  
+
 ;;; the number of arguments/return values passed in registers
   (def!constant register-arg-count 4)
 
@@ -296,7 +308,7 @@
        (offset (tn-offset tn)))
    (ecase sb
      (registers (or (svref *register-names* offset)
-		    (format nil "R~D" offset)))
+                    (format nil "R~D" offset)))
      (float-registers (format nil "F~D" offset))
      (stack (format nil "S~D" offset))
      (constant (format nil "Const~D" offset))

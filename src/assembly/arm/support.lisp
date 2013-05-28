@@ -16,29 +16,29 @@
     ((:raw :none)
      (let ((jump (make-symbol "JUMP")))
        (values
-	`((inst lr ,jump (make-fixup ',name :assembly-routine))
-	  (inst blx ,jump))
-	`((:temporary (:sc any-reg) ,jump)))))
+        `((inst lr ,jump (make-fixup ',name :assembly-routine))
+          (inst blx ,jump))
+        `((:temporary (:sc any-reg) ,jump)))))
     (:full-call
      (let ((jump (make-symbol "JUMP")))
        (values
-	`((inst lr ,jump (make-fixup ',name :assembly-routine))
-	  (note-this-location ,vop :call-site)
-	  (inst blx ,jump)
-	  (note-this-location ,vop :single-value-return)
-	  (let ((single-value (gen-label)))
-	    (inst b single-value :cc)
-	    ;; @@@TODO: figure out what this should be in the ARM ABI
-	    ;; --vnp 2013-05-17
-	    ;; (move esp-tn ebx-tn)
-	    (emit-label single-value)))
-	`((:temporary (:sc any-reg) ,jump)
-	  (:save-p :compute-only)))))))
+        `((inst lr ,jump (make-fixup ',name :assembly-routine))
+          (note-this-location ,vop :call-site)
+          (inst blx ,jump)
+          (note-this-location ,vop :single-value-return)
+          (let ((single-value (gen-label)))
+            (inst b single-value :cc)
+            ;; @@@TODO: figure out what this should be in the ARM ABI
+            ;; --vnp 2013-05-17
+            ;; (move esp-tn ebx-tn)
+            (emit-label single-value)))
+        `((:temporary (:sc any-reg) ,jump)
+          (:save-p :compute-only)))))))
 
 (!def-vm-support-routine generate-return-sequence (style)
   (ecase style
     ((:raw :full-call)
      `((inst bx (make-random-tn :kind :normal
-				:sc (sc-or-lose 'interior-reg)
-				:offset lr-offset))))
+                                :sc (sc-or-lose 'interior-reg)
+                                :offset lr-offset))))
     (:none)))

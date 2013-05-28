@@ -57,13 +57,13 @@
 ;; 12-bit modified immediate constants, see Section A5.2.4
 (defun immed12-encoding (immed)
   (macrolet ((frob (const-mask rot-mask rot-bits)
-	       `(when (= immed (logand immed ,const-mask))
-		  (return-from immed12-encoding
-		    (logior ,rot-mask
-			    (logior
-			     (ldb (byte 8 0) (ash immed ,rot-bits))
-			     (ldb (byte 8 0) (ash immed ,(- rot-bits 32))))))))
-	     )
+               `(when (= immed (logand immed ,const-mask))
+                  (return-from immed12-encoding
+                    (logior ,rot-mask
+                            (logior
+                             (ldb (byte 8 0) (ash immed ,rot-bits))
+                             (ldb (byte 8 0) (ash immed ,(- rot-bits 32))))))))
+             )
     (frob #x000000ff #x000  0)
     (frob #xc000003f #x100  2)
     (frob #xf000000f #x200  4)
@@ -142,14 +142,14 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (byte 32 0))
 
 
-;;; Data processing (register) instruction emitter 
+;;; Data processing (register) instruction emitter
 ;;; Template:
 ;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
 (define-bitfield-emitter emit-dp-reg-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
   (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
 
-;;; Data processing (register-shifter register) instruction emitter 
+;;; Data processing (register-shifter register) instruction emitter
 ;;; Template:
 ;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
 (define-bitfield-emitter emit-dp-rsr-inst 32
@@ -157,7 +157,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (byte 4 8) (byte 1 7) (byte 2 5) (byte 1 4) (byte 4 0))
 
 ;;; Data processing (immediate) instruction emitter
-;;; Template: 
+;;; Template:
 ;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
 (define-bitfield-emitter emit-dp-imm-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
@@ -182,54 +182,54 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
 ;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
 (macrolet ((define-dp-instruction (name op)
-	     `(define-instruction ,name (segment dst src &key (cnd :al)
-						 src2 shift shift-op)
-		(:delay 1)
-		(:cost 1)
-		(:dependencies (reads src) (writes dst))
-		(:emitter
-		 (let ((fld ,op)
-		       src1)
-		   (if src2
-		       (setf src1 src)
-		       (setf src1 dst src2 src))
-		   (if shift-op
-		       (cond
-			 ;; first form (register)
-			 ((integerp shift)
-			  (emit-dp-reg-inst segment
-					    (cond-encoding cnd) ,fld
-					    (reg-tn-encoding src1)
-					    (reg-tn-encoding dst)
-					    shift
-					    (shift-op-encoding shift-op) #b0
-					    (reg-tn-encoding src2)))
-			 ;; second form (register-shifted register)
-			 ((register-p shift)
-			  (emit-dp-rsr-inst segment
-					    (cond-encoding cnd) ,fld
-					    (reg-tn-encoding src1)
-					    (reg-tn-encoding dst)
-					    (reg-tn-encoding shift)
-					    #b0 (shift-op-encoding shift-op) #b1
-					    (reg-tn-encoding src2)))
-			 (t
-			  (error "Bad shift operand in ~a!" ,name)))
-		       (if (register-p src2)
-			   ;; first form (register, special case of 0 shift)
-			   (emit-dp-reg-inst segment
-					     (cond-encoding cnd) ,fld
-					     (reg-tn-encoding src1)
-					     (reg-tn-encoding dst)
-					     #b00000 #b00 #b0
-					     (reg-tn-encoding src2))
-			   ;; third form (immediate)
-			   (emit-dp-imm-inst segment
-					     (cond-encoding cnd)
-					     (logior #b100000 ,fld)
-					     (reg-tn-encoding src1)
-					     (reg-tn-encoding dst)
-					     (immed12-encoding src2)))))))))
+             `(define-instruction ,name (segment dst src &key (cnd :al)
+                                                 src2 shift shift-op)
+                (:delay 1)
+                (:cost 1)
+                (:dependencies (reads src) (writes dst))
+                (:emitter
+                 (let ((fld ,op)
+                       src1)
+                   (if src2
+                       (setf src1 src)
+                       (setf src1 dst src2 src))
+                   (if shift-op
+                       (cond
+                         ;; first form (register)
+                         ((integerp shift)
+                          (emit-dp-reg-inst segment
+                                            (cond-encoding cnd) fld
+                                            (reg-tn-encoding src1)
+                                            (reg-tn-encoding dst)
+                                            shift
+                                            (shift-op-encoding shift-op) #b0
+                                            (reg-tn-encoding src2)))
+                         ;; second form (register-shifted register)
+                         ((register-p shift)
+                          (emit-dp-rsr-inst segment
+                                            (cond-encoding cnd) fld
+                                            (reg-tn-encoding src1)
+                                            (reg-tn-encoding dst)
+                                            (reg-tn-encoding shift)
+                                            #b0 (shift-op-encoding shift-op) #b1
+                                            (reg-tn-encoding src2)))
+                         (t
+                          (error "Bad shift operand in ~a!" ',name)))
+                       (if (register-p src2)
+                           ;; first form (register, special case of 0 shift)
+                           (emit-dp-reg-inst segment
+                                             (cond-encoding cnd) fld
+                                             (reg-tn-encoding src1)
+                                             (reg-tn-encoding dst)
+                                             #b00000 #b00 #b0
+                                             (reg-tn-encoding src2))
+                           ;; third form (immediate)
+                           (emit-dp-imm-inst segment
+                                             (cond-encoding cnd)
+                                             (logior #b100000 fld)
+                                             (reg-tn-encoding src1)
+                                             (reg-tn-encoding dst)
+                                             (immed12-encoding src2)))))))))
   (define-dp-instruction and   #b00000000)
   (define-dp-instruction ands  #b00000001)
   (define-dp-instruction eor   #b00000010)
@@ -265,31 +265,31 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;; Instructions based on the %MOV/%MOVS templates with special values for he
 ;; shifter and operands.
 (macrolet ((mov-frob (name base)
-	     `(define-instruction-macro ,name (dst src &key (cnd :al))
-		`(inst ,,base ,dst (make-random-tn :kind :normal
-						   :sc (sc-or-lose 'any-reg)
-						   :offset 0)
-		       :cnd ,cnd
-		       :src2 ,src)))
-	   (shift-frob (name base shift-op)
-	     `(define-instruction-macro ,name (dst src shift &key (cnd :al))
-		`(inst ,,base ,dst (make-random-tn :kind :normal
-						   :sc (sc-or-lose 'any-reg)
-						   :offset 0)
-		       :cnd ,cnd
-		       :src2 ,src
-		       :shift-op ,,shift-op
-		       :shift ,shift))))
-  (mov-frob   mov  %mov)
-  (mov-frob   movs %movs)
-  (shift-frob lsl  %mov  :lsl)
-  (shift-frob lsls %movs :lsl)
-  (shift-frob lsr  %mov  :lsr)
-  (shift-frob lsrs %movs :lsr)
-  (shift-frob asr  %mov  :asr)
-  (shift-frob asrs %movs :asr)
-  (shift-frob ror  %mov  :ror)
-  (shift-frob rors %movs :ror))
+             `(define-instruction-macro ,name (dst src &key (cnd :al))
+                `(inst ,,base ,dst (make-random-tn :kind :normal
+                                                   :sc (sc-or-lose 'any-reg)
+                                                   :offset 0)
+                       :cnd ,cnd
+                       :src2 ,src)))
+           (shift-frob (name base shift-op)
+             `(define-instruction-macro ,name (dst src shift &key (cnd :al))
+                `(inst ,,base ,dst (make-random-tn :kind :normal
+                                                   :sc (sc-or-lose 'any-reg)
+                                                   :offset 0)
+                       :cnd ,cnd
+                       :src2 ,src
+                       :shift-op ,,shift-op
+                       :shift ,shift))))
+  (mov-frob   mov  '%mov)
+  (mov-frob   movs '%movs)
+  (shift-frob lsl  '%mov  :lsl)
+  (shift-frob lsls '%movs :lsl)
+  (shift-frob lsr  '%mov  :lsr)
+  (shift-frob lsrs '%movs :lsr)
+  (shift-frob asr  '%mov  :asr)
+  (shift-frob asrs '%movs :asr)
+  (shift-frob ror  '%mov  :ror)
+  (shift-frob rors '%movs :ror))
 
 (define-instruction-macro rrx (dst src &key (cnd :al))
   `(inst ror ,dst ,src 0 :cnd ,cnd))
@@ -304,50 +304,70 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 
 ;;;=============================================================================
 ;;; A5.3 Load/store word and unsigned byte
-;;; CCCC|01A|op1  |Rn  |...........|B|....|
-;;; CCCC|010|PU0W0|Rn  |Rt  |immed12..... | - STR Rt, [Rn, #immed]
-;;; CCCC|011|PU0W0|Rn  |Rt  |
-(define-instruction str (src base offset &key (cnd :al) index wback)
-  (:declare (type (integer -4096 4096) offset))
-  (:delay 1)
-  (:cost 1)
-  (:dependencies (reads src) (reads base) (writes :memory))
-  (:emitter
-   (let ((fld #b01000000)
-	 (add nil))
-     (if (>= offset 0)
-	 (setf add t)
-	 (setf offset (- offset)))
-     (when index (setf fld (logior fld #b00010000)))
-     (when add   (setf fld (logior fld #b00001000)))
-     (when wback (setf fld (logior fld #b00000010)))
-     (emit-dp-imm-inst segment (cond-encoding cnd) fld
-		       (reg-tn-encoding base)
-		       (reg-tn-encoding src)
-		       offset))))
-     
-     
+;;; CCCC|01A|op1  |Rn  |...........  |B|....| - template
+;;; CCCC|010|PU0W0|Rn  |Rt  |immed12.....   | - STR Rt, [Rn, #immed]
+;;; CCCC|011|PU0W0|Rn  |Rt  |imm5.|tp|0|Rm..| - STR Rt, [Rn, Rm, {,shift}]!
+;;; CCCC|010|1U001|1111|Rt  |immed12.....   | - LDR Rt, <label> (sp. of form1)
+(macrolet ((define-ls-instruction (name op dir)
+             `(define-instruction ,name (segment src base offset &key (cnd :al)
+						 (index t) (add t) wback
+						 shift shift-op)
+                (:declare (type (or (integer -4096 4096) tn) offset))
+                (:delay 1)
+                (:cost 1)
+                ,(ecase dir
+                        (:load '(:dependencies (writes src) (reads base)
+					      (reads :memory)))
+                        (:store '(:dependencies (reads src) (reads base)
+					       (writes :memory))))
+                (:emitter
+                 (let ((fld ,op))
+                   (when index (setf fld (logior fld #b00010000)))
+                   (when add   (setf fld (logior fld #b00001000)))
+                   (when wback (setf fld (logior fld #b00000010)))
+                   (cond
+                     ;; first form (immediate)
+                     ((integerp offset)
+                      (emit-dp-imm-inst segment (cond-encoding cnd) fld
+                                        (reg-tn-encoding base)
+                                        (reg-tn-encoding src)
+                                        offset))
+                     ;; second form (register)
+                     ((register-p offset)
+                      (setf fld (logior fld #b00100000))
+                      (emit-dp-reg-inst segment (cond-encoding cnd) fld
+                                        (reg-tn-encoding base)
+                                        (reg-tn-encoding src)
+                                        shift
+                                        (shift-op-encoding shift-op) #b0
+                                        (reg-tn-encoding offset)))
+                     (t (error "Bad offset operand in ~a!" ',name))))))))
+  (define-ls-instruction str  #b01000000 :store)
+  (define-ls-instruction strb #b01000100 :store)
+  (define-ls-instruction ldr  #b01000001 :load)
+  (define-ls-instruction ldrb #b01000101 :load)
+  )
 
 ;;; End of A5.3
 ;;;=============================================================================
 
 
 (macrolet ((frob (name fx op)
-	     `(define-instruction ,name (segment dst src &key (cnd :al))
-		(:declare (type (or fixup (unsigned-byte 16)
-				    (signed-byte 16)) src))
-		(:delay 1)
-		(:cost 1)
-		(:dependencies (writes dst))
-		(:emitter
-		 (when (typep src 'fixup)
-		   (note-fixup segment ,fx src)
-		   (setq src (or (fixup-offset src) 0)))
-		 (let ((imm4 (ldb (byte 4 12) src))
-		       (imm12 (ldb (byte 12 0) src)))
-		   (emit-a523-inst segment (cond-encoding cnd)
-				   #b001 ,op imm4
-				   (reg-tn-encoding dst) imm12))))))
+             `(define-instruction ,name (segment dst src &key (cnd :al))
+                (:declare (type (or fixup (unsigned-byte 16)
+                                    (signed-byte 16)) src))
+                (:delay 1)
+                (:cost 1)
+                (:dependencies (writes dst))
+                (:emitter
+                 (when (typep src 'fixup)
+                   (note-fixup segment ,fx src)
+                   (setq src (or (fixup-offset src) 0)))
+                 (let ((imm4 (ldb (byte 4 12) src))
+                       (imm12 (ldb (byte 12 0) src)))
+                   (emit-a523-inst segment (cond-encoding cnd)
+                                   #b001 ,op imm4
+                                   (reg-tn-encoding dst) imm12))))))
   (frob movw :l #b10000)
   (frob movt :ha #b10100))
 
@@ -357,8 +377,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
              `(define-instruction ,name (segment rm &key (cnd :al))
                 (:emitter
                  (emit-dp-reg-inst segment (cond-encoding cnd)
-				 #b00010010 #b1111 #b1111 #b11110
-				 ,op1 ,op2 (reg-tn-encoding rm)))))
+                                 #b00010010 #b1111 #b1111 #b11110
+                                 ,op1 ,op2 (reg-tn-encoding rm)))))
            )
   (define-a5212-instruction bx  #b00 #b1)
   (define-a5212-instruction bxj #b01 #b0)
@@ -370,17 +390,17 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
    (emit-chooser
     segment 4 0
     (lambda (segment posn delta-if-after)
-      (declare (ignore segment posn delta-if-after))
+      (declare (ignore segment posn delta-if-after)))
     (lambda (segment posn)
       ;; @@@FIXME: this calculation maybe wrong, but I don't know yet, I
       ;;           just produced it from the top of my head, following
       ;;           whatever leads I got, but am not 100% sure that its fine
       ;; --vnp 2013-05-17
       (let ((disp (ash (- (label-position where) (+ posn 4)) -2)))
-	(emit-word segment
-		   (dpb (cond-encoding cnd)
-			(byte 4 28)
-			(dpb #b1010 (byte 4 24) disp)))))))))
+        (emit-word segment
+                   (dpb (cond-encoding cnd)
+                        (byte 4 28)
+                        (dpb #b1010 (byte 4 24) disp))))))))
 
 ;;; Some more macros
 
@@ -389,7 +409,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
     ((or (signed-byte 16) (unsigned-byte 16)) (inst movw reg value))
     ((or (signed-byte 32) (unsigned-byte 32))
      (let* ((high-half (ldb (byte 16 16) value))
-	    (low-half (ldb (byte 16 0) value)))
+            (low-half (ldb (byte 16 0) value)))
        (declare (type (unsigned-byte 16) high-half low-half))
        (inst movw reg low-half)
        (inst movt reg high-half)))
@@ -429,7 +449,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 
 ;; (define-bitfield-emitter emit-a5212-inst 32
 ;;   (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
- 
+
 
 
 ;; ;; A5.2.5 Multiply and multiply-accumulate -- 14 insts
@@ -438,7 +458,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;            (define-a525-subtype1-instruction (name op)
 ;;              `(define-instruction ,name (segment cnd rd rn rm)
 ;;                 (:emitter (emit-a525-inst segment (conditional-opcode cnd)
-;;                                           #b0000 ,op 
+;;                                           #b0000 ,op
 ;;                                           (reg-encode rd) #b0000
 ;;                                           (reg-encode rm)
 ;;                                           #b1001
