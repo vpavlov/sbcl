@@ -1,6 +1,6 @@
 ;;;; miscellaneous VM definition noise for the ARM
 ;;;;
-;;;; This is based on cmucl/src/compiler/rt/vm.lisp -- VNP 2013-06-03
+;;;; This is based on cmucl/src/compiler/rt/vm.lisp -- VNP 2013-07-03
 
 ;;;; This software is part of the SBCL system. See the README file for
 ;;;; more information.
@@ -174,7 +174,7 @@
 ;;; be able to accomodate PC, LR (not in the list) and THREAD. These are:
 ;;;   - nsp, nfp: we'll go with not having a separate number stack
 ;;;   - lexenv: the PPC backend says 'and why blow a register for this?'
-;;; -- VNP 2013-06-03
+;;; -- VNP 2013-07-03
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (def!constant a0-offset     0)
