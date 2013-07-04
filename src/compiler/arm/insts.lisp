@@ -162,13 +162,15 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 (define-bitfield-emitter emit-dp-imm-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
 
-
-
-
-
 (define-bitfield-emitter emit-a523-inst 32
   (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
   (byte 4 12) (byte 12 0))
+
+;;; CCCC|00010010|imm12.......|0111|imm4| -- BKPT #imm16
+(define-bitfield-emitter emit-misc-inst 32
+  (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
+
+
 ;; 
 ;;;; Instruction definitions
 
@@ -371,18 +373,24 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (frob movw :l #b10000)
   (frob movt :ha #b10100))
 
-;; A5.2.12
+;; A5.2.12 Miscellaneous instructions
 (macrolet (
-           (define-a5212-instruction (name op1 op2)
+           (define-misc-instruction (name op1 op2)
              `(define-instruction ,name (segment rm &key (cnd :al))
                 (:emitter
                  (emit-dp-reg-inst segment (cond-encoding cnd)
                                  #b00010010 #b1111 #b1111 #b11110
                                  ,op1 ,op2 (reg-tn-encoding rm)))))
            )
-  (define-a5212-instruction bx  #b00 #b1)
-  (define-a5212-instruction bxj #b01 #b0)
-  (define-a5212-instruction blx #b01 #b1))
+  (define-misc-instruction bx  #b00 #b1)
+  (define-misc-instruction bxj #b01 #b0)
+  (define-misc-instruction blx #b01 #b1))
+
+(define-instruction bkpt (segment imm16)
+  (:emitter
+   (let ((imm12 (ldb (byte 12 4) imm16))
+	 (imm4 (ldb (byte 4 0) imm16)))
+     (emit-misc-inst #b1110 segment #b00010010 imm12 #b0111 imm4))))
 
 ;; A5.5 Branch, branch with link and block data transfer
 (define-instruction b (segment where &key (cnd :al))
@@ -421,7 +429,53 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   `(%lr ,reg ,value))
 
 
+
+;;;; Instructions for dumping data and header objects.
 
+(define-instruction word (segment word)
+  (:declare (type (or (unsigned-byte 32) (signed-byte 32)) word))
+  :pinned
+  (:delay 0)
+  (:emitter
+   (emit-word segment word)))
+
+(define-instruction short (segment short)
+  (:declare (type (or (unsigned-byte 16) (signed-byte 16)) short))
+  :pinned
+  (:delay 0)
+  (:emitter
+   (emit-short segment short)))
+
+(define-instruction byte (segment byte)
+  (:declare (type (or (unsigned-byte 8) (signed-byte 8)) byte))
+  :pinned
+  (:delay 0)
+  (:emitter
+   (emit-byte segment byte)))
+
+(define-bitfield-emitter emit-header-object 32
+  (byte 24 8) (byte 8 0))
+
+(defun emit-header-data (segment type)
+  (emit-back-patch
+   segment 4
+   #'(lambda (segment posn)
+       (emit-word segment
+                  (logior type
+                          (ash (+ posn (component-header-length))
+                               (- n-widetag-bits word-shift)))))))
+
+(define-instruction simple-fun-header-word (segment)
+  :pinned
+  (:delay 0)
+  (:emitter
+   (emit-header-data segment simple-fun-header-widetag)))
+
+(define-instruction lra-header-word (segment)
+  :pinned
+  (:delay 0)
+  (:emitter
+   (emit-header-data segment return-pc-header-widetag)))
 
 
 ;; 
