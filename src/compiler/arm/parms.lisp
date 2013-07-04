@@ -59,6 +59,22 @@
 ;;; Size of one linkage-table entry in bytes.
 (def!constant linkage-table-entry-size 8)
 
+;;;; other miscellaneous constants
+
+(defenum (:start 8)
+  halt-trap
+  pending-interrupt-trap
+  error-trap
+  cerror-trap
+  breakpoint-trap
+  fun-end-breakpoint-trap
+  single-step-around-trap
+  single-step-before-trap)
+
+(defenum (:start 24)
+  object-not-list-trap
+  object-not-instance-trap)
+
 ;;;; static symbols
 
 ;;; These symbols are loaded into static space directly after NIL so
@@ -69,8 +85,7 @@
 ;;; space directly after the static symbols. That way, the raw-addr
 ;;; can be loaded directly out of them by indirecting relative to NIL.
 ;;;
-;;; pfw X86 doesn't have enough registers to keep these things there.
-;;;     Note these spaces grow from low to high addresses.
+;;; ARM doesn't have enough registers to keep these things there.
 (defvar *allocation-pointer*)
 (defvar *binding-stack-pointer*)
 
