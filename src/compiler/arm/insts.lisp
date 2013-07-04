@@ -439,13 +439,6 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (:emitter
    (emit-word segment word)))
 
-(define-instruction short (segment short)
-  (:declare (type (or (unsigned-byte 16) (signed-byte 16)) short))
-  :pinned
-  (:delay 0)
-  (:emitter
-   (emit-short segment short)))
-
 (define-instruction byte (segment byte)
   (:declare (type (or (unsigned-byte 8) (signed-byte 8)) byte))
   :pinned
@@ -477,6 +470,71 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (:emitter
    (emit-header-data segment return-pc-header-widetag)))
 
+
+
+;;;; Instructions for converting between code objects, functions, and lras.
+(defun emit-compute-inst (segment vop dst src label temp calc)
+  (emit-chooser
+   ;; We emit either 12 or 4 bytes, so we maintain 8 byte alignments.
+   segment 12 3
+   #'(lambda (segment posn delta-if-after)
+       (let ((delta (funcall calc label posn delta-if-after)))
+         (when (<= (- (ash 1 15)) delta (1- (ash 1 15)))
+           (emit-back-patch
+	    segment 4
+	    #'(lambda (segment posn)
+		(assemble (segment vop)
+			  (inst add dst src
+				:src2 (funcall calc label posn 0)))))
+           t)))
+   #'(lambda (segment posn)
+       (let ((delta (funcall calc label posn 0)))
+         (assemble (segment vop)
+		   (inst lr temp delta)
+                   (inst add dst src :src2 temp))))))
+
+;; code = lip - header - label-offset + other-pointer-tag
+(define-instruction compute-code-from-lip (segment dst src label temp)
+  (:declare (type tn dst src temp) (type label label))
+  (:attributes variable-length)
+  (:dependencies (reads src) (writes dst) (writes temp))
+  (:delay 0)
+  (:vop-var vop)
+  (:emitter
+   (emit-compute-inst segment vop dst src label temp
+                      #'(lambda (label posn delta-if-after)
+                          (- other-pointer-lowtag
+                             ;;function-pointer-type
+                             (label-position label posn delta-if-after)
+                             (component-header-length))))))
+
+;; code = lra - other-pointer-tag - header - label-offset + other-pointer-tag
+;;      = lra - (header + label-offset)
+(define-instruction compute-code-from-lra (segment dst src label temp)
+  (:declare (type tn dst src temp) (type label label))
+  (:attributes variable-length)
+  (:dependencies (reads src) (writes dst) (writes temp))
+  (:delay 0)
+  (:vop-var vop)
+  (:emitter
+   (emit-compute-inst segment vop dst src label temp
+                      #'(lambda (label posn delta-if-after)
+                          (- (+ (label-position label posn delta-if-after)
+                                (component-header-length)))))))
+
+;; lra = code + other-pointer-tag + header + label-offset - other-pointer-tag
+;;     = code + header + label-offset
+(define-instruction compute-lra-from-code (segment dst src label temp)
+  (:declare (type tn dst src temp) (type label label))
+  (:attributes variable-length)
+  (:dependencies (reads src) (writes dst) (writes temp))
+  (:delay 0)
+  (:vop-var vop)
+  (:emitter
+   (emit-compute-inst segment vop dst src label temp
+                      #'(lambda (label posn delta-if-after)
+                          (+ (label-position label posn delta-if-after)
+                             (component-header-length))))))
 
 ;; 
 ;; ;;; Instruction formats and corresponding emitters

@@ -127,7 +127,7 @@
 
   ;; Pointers to the interior of objects.  Used only as an temporary.
   (interior-reg registers
-   :locations (12))
+   :locations (12 14))
 
 
   ;; **** Things that can go in the floating point registers.
@@ -191,7 +191,8 @@
   (def!constant cname-offset 10)
   (def!constant lra-offset   11)
   (def!constant lip-offset   12)
-  (def!constant csp-offset   13))
+  (def!constant csp-offset   13)
+  (def!constant lr-offset    14))
 
 ;;; Lisp-interior-pointer register.
 ;;;
