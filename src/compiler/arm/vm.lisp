@@ -13,6 +13,8 @@
 
 (in-package "SB!VM")
 
+(deftype sap-int () '(unsigned-byte 32))
+
 
 ;;;; SB and SC definition:
 
@@ -117,13 +119,6 @@
   ;; Random objects that must not be seen by GC.  Used only as temporaries.
   (non-descriptor-reg registers
    :locations (3 4 5))
-
-  ;; Word-aligned pointers that cannot be in R0.  Used for temporaries and to
-  ;; hold stack pointers.
-  (word-pointer-reg registers
-   :locations (0 1 2 3 4 10 11)
-   :save-p t
-   :alternate-scs (control-stack))
 
   ;; Pointers to the interior of objects.  Used only as an temporary.
   (interior-reg registers

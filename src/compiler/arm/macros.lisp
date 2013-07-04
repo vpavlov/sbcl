@@ -179,9 +179,9 @@
   (once-only ((n-reg reg)
               (n-stack reg-or-stack))
     `(sc-case ,n-reg
-       ((any-reg descriptor-reg non-descriptor-reg word-pointer-reg)
+       ((any-reg descriptor-reg non-descriptor-reg)
         (sc-case ,n-stack
-          ((any-reg descriptor-reg non-descriptor-reg word-pointer-reg)
+          ((any-reg descriptor-reg non-descriptor-reg)
            (move ,n-reg ,n-stack))
           ((control-stack)
            (loadw ,n-reg cfp-tn (tn-offset ,n-stack))))))))
@@ -265,41 +265,34 @@
 ;;; should also cover subsequent initialization of the object.
 
 ;;; (FIXME: so why aren't we asserting this?)
-(defun allocation (alloc-tn size &key stack-p lowtag temp-tn temp2-tn)
-  (if stack-p
-      (allocation-dynamic-extent alloc-tn size lowtag)
-      (progn
-	(allocation-inline alloc-tn size temp-tn temp2-tn)
-	(inst add alloc-tn alloc-tn :src2 lowtag)))
+(defun allocation (alloc-tn size temp-tn temp2-tn
+		   &optional dynamic-extent lowtag)
+  (cond
+    (dynamic-extent
+     (allocation-dynamic-extent alloc-tn size lowtag))
+    (t
+     (allocation-inline alloc-tn size temp-tn temp2-tn)))
+  (when (and lowtag (not dynamic-extent))
+    (inst add alloc-tn alloc-tn :src2 lowtag))
   (values))
 
 (defmacro with-fixed-allocation ((result-tn temp-tn temp2-tn widetag size
-					    &key (lowtag other-pointer-lowtag)
-					    stack-allocate-p)
+					    &optional stack-allocate-p)
                                  &body forms)
   "Do stuff to allocate an object (having the specified LOWTAG) of fixed SIZE
 with a single word header having the specified WIDETAG value. The result is
 placed in RESULT-TN, and TEMP-TN/2 are non-descriptor temps (which may be
 randomly used by the body). The body is placed inside the PSEUDO-ATOMIC,
 and presumably initializes the object."
-  (once-only ((result-tn result-tn)
-	      (temp-tn temp-tn)
-	      (temp2-tn temp2-tn)
-	      (size size)
-	      (stack-allocate-p stack-allocate-p)
-	      (widetag widetag)
-	      (lowtag lowtag))
-	     `(maybe-pseudo-atomic
-	       ,stack-allocate-p ,temp-tn
-	       (allocation ,result-tn (pad-data-block ,size)
-			   :stack-p ,stack-allocate-p
-			   :lowtag ,lowtag
-			   :temp-tn ,temp-tn
-			   :temp2-tn ,temp2-tn)
-	       (inst lr ,temp-tn (logior (ash (1- ,size) n-widetag-bits)
-					 ,widetag))
-	       (storew ,temp-tn ,result-tn 0 ,lowtag)
-	       ,@forms)))
+  (unless forms
+    (bug "empty &body in WITH-FIXED-ALLOCATION"))
+  (once-only ((result-tn result-tn) (size size) (stack-allocate-p stack-allocate-p) (temp-tn temp-tn) (temp2-tn temp2-tn) (widetag widetag))
+    `(maybe-pseudo-atomic ,stack-allocate-p ,temp-tn
+       (allocation ,result-tn (pad-data-block ,size) ,temp-tn ,temp2-tn
+		   ,stack-allocate-p other-pointer-lowtag)
+       (inst lr ,temp-tn (logior (ash (1- ,size) n-widetag-bits) ,widetag))
+       (storew ,temp-tn ,result-tn 0 other-pointer-lowtag)
+       ,@forms)))
 
 ;;;; error code
 (defun emit-error-break (vop kind code values)
@@ -356,7 +349,7 @@ and presumably initializes the object."
        (progn ,@forms)
        (pseudo-atomic ,temp-tn ,@forms)))
 
-(defmacro pseudo-atomic (temp-tn &body forms)
+(defmacro pseudo-atomic (temp-tn &rest forms)
   (with-unique-names (label)
     `(let ((,label (gen-label)))
        ;; Note: we use CFP-TN as some random non-zero value
@@ -374,7 +367,7 @@ and presumably initializes the object."
        #!-sb-thread
        (load-symbol-value ,temp-tn *pseudo-atomic-bits*)
 
-       (inst xors ,temp-tn cfp-tn)
+       (inst eors ,temp-tn cfp-tn)
        (inst b ,label :cnd :eq)
        (inst bkpt pending-interrupt-trap)
        (emit-label ,label))))

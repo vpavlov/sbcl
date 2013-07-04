@@ -2098,8 +2098,7 @@ register."
                    sb!vm:n-word-bytes)))
     (ecase (sb!c:sc-offset-scn sc-offset)
       ((#.sb!vm:any-reg-sc-number
-        #.sb!vm:descriptor-reg-sc-number
-        #!+rt #.sb!vm:word-pointer-reg-sc-number)
+        #.sb!vm:descriptor-reg-sc-number)
        (without-gcing
         (with-escaped-value (val)
           (make-lisp-obj val nil))))
@@ -2286,8 +2285,7 @@ register."
                    sb!vm:n-word-bytes)))
     (ecase (sb!c:sc-offset-scn sc-offset)
       ((#.sb!vm:any-reg-sc-number
-        #.sb!vm:descriptor-reg-sc-number
-        #!+rt #.sb!vm:word-pointer-reg-sc-number)
+        #.sb!vm:descriptor-reg-sc-number)
        (without-gcing
         (set-escaped-value
           (get-lisp-obj-address value))))
