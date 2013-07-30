@@ -178,13 +178,13 @@
   (def!constant ocfp-offset   3)
   (def!constant nl0-offset    4)
   (def!constant nargs-offset  5)
-  (def!constant cfp-offset    6)
+  (def!constant lra-offset    6)
   (def!constant code-offset   7)
   (def!constant null-offset   8)
   #!+sb-thread
   (def!constant thread-offset 9)
   (def!constant cname-offset 10)
-  (def!constant lra-offset   11)
+  (def!constant cfp-offset   11)
   (def!constant lip-offset   12)
   (def!constant csp-offset   13)
   (def!constant lr-offset    14))
@@ -290,8 +290,6 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
 ;;; Offsets of special stack frame locations.
 ;;;
-  (def!constant ocfp-save-offset 0)
-  (def!constant lra-save-offset 1)
 
 ;;; The number of arguments/return values passed in registers.
 ;;;
@@ -320,6 +318,43 @@
 			      :sc (sc-or-lose 'descriptor-reg)
 			      :offset n))
 	  *register-arg-offsets*))
+
+
+
+;;;; miscellaneous function call parameters
+
+;;; Offsets of special stack frame locations relative to CFP
+;;;
+;;; Consider the standard prologue:
+;;;
+;;; mov ip, sp
+;;; stmfd sp!, {fp, ip, lr, pc}
+;;;
+;;; This leads to the following picture:
+;;; FP+4    = stack pointer before calling the function
+;;; FP[  0] = saved program counter
+;;; FP[ -4] = saved link register (= saved return-pc)
+;;; FP[ -8] = saved stack pointer
+;;; FP[-12] = saved frame pointer (= saved ocfp)
+(def!constant return-pc-save-offset 0)
+(def!constant ocfp-save-offset 2)
+;;; Let SP be the stack pointer before CALLing, and FP is the frame
+;;; pointer after the standard prologue. SP +
+;;; FRAME-WORD-OFFSET(SP->FP-OFFSET + I) = FP + FRAME-WORD-OFFSET(I).
+(def!constant sp->fp-offset 1)
+
+(declaim (inline frame-word-offset))
+(defun frame-word-offset (index)
+  (- (1- index)))
+
+(declaim (inline frame-byte-offset))
+(defun frame-byte-offset (index)
+  (* (frame-word-offset index) n-word-bytes))
+
+(def!constant lra-save-offset return-pc-save-offset)
+
+;;; This is used by the debugger.
+(def!constant single-value-return-byte-offset 2)
 
 
 

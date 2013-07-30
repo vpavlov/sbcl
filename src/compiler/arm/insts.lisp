@@ -10,11 +10,14 @@
 ;;;; files for more information.
 
 (in-package "SB!VM")
+
 
 ;; Various helpers
 (defun register-p (thing)
   (and (tn-p thing)
        (eq (sb-name (sc-sb (tn-sc thing))) 'registers)))
+
+
 ;; 
 ;; Printers for the various instruction arguments
 
@@ -52,6 +55,11 @@
 (defun reg-tn-encoding (tn)
   (declare (type tn tn))
   (aver (eq (sb-name (sc-sb (tn-sc tn))) 'registers))
+  (tn-offset tn))
+
+(defun freg-tn-encoding (tn)
+  (declare (type tn tn))
+  (aver (eq (sb-name (sc-sb (tn-sc tn))) 'float-registers))
   (tn-offset tn))
 
 ;; 12-bit modified immediate constants, see Section A5.2.4
@@ -134,6 +142,70 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
                           (type stream stream) (fixnum value))
                  (unless (= value 0)
                    (princ (format nil "#~d" value) stream))))
+
+(defparameter *vfp-mov-immed-alist*
+  '((2.0 . 0) (2.125 . 1) (2.25 . 2) (2.375 . 3) (2.5 . 4) (2.625 . 5)
+    (2.75 . 6) (2.875 . 7) (3.0 . 8) (3.125 . 9) (3.25 . 10) (3.375 . 11)
+    (3.5 . 12) (3.625 . 13) (3.75 . 14) (3.875 . 15) (4.0 . 16) (4.25 . 17)
+    (4.5 . 18) (4.75 . 19) (5.0 . 20) (5.25 . 21) (5.5 . 22) (5.75 . 23)
+    (6.0 . 24) (6.25 . 25) (6.5 . 26) (6.75 . 27) (7.0 . 28) (7.25 . 29)
+    (7.5 . 30) (7.75 . 31) (8.0 . 32) (8.5 . 33) (9.0 . 34) (9.5 . 35)
+    (10.0 . 36) (10.5 . 37) (11.0 . 38) (11.5 . 39) (12.0 . 40) (12.5 . 41)
+    (13.0 . 42) (13.5 . 43) (14.0 . 44) (14.5 . 45) (15.0 . 46) (15.5 . 47)
+    (16.0 . 48) (17.0 . 49) (18.0 . 50) (19.0 . 51) (20.0 . 52) (21.0 . 53)
+    (22.0 . 54) (23.0 . 55) (24.0 . 56) (25.0 . 57) (26.0 . 58) (27.0 . 59)
+    (28.0 . 60) (29.0 . 61) (30.0 . 62) (31.0 . 63) (0.125 . 64)
+    (0.1328125 . 65) (0.140625 . 66) (0.1484375 . 67) (0.15625 . 68)
+    (0.1640625 . 69) (0.171875 . 70) (0.1796875 . 71) (0.1875 . 72)
+    (0.1953125 . 73) (0.203125 . 74) (0.2109375 . 75) (0.21875 . 76)
+    (0.2265625 . 77) (0.234375 . 78) (0.2421875 . 79) (0.25 . 80)
+    (0.265625 . 81) (0.28125 . 82) (0.296875 . 83) (0.3125 . 84)
+    (0.328125 . 85) (0.34375 . 86) (0.359375 . 87) (0.375 . 88)
+    (0.390625 . 89) (0.40625 . 90) (0.421875 . 91) (0.4375 . 92)
+    (0.453125 . 93) (0.46875 . 94) (0.484375 . 95) (0.5 . 96) (0.53125 . 97)
+    (0.5625 . 98) (0.59375 . 99) (0.625 . 100) (0.65625 . 101) (0.6875 . 102)
+    (0.71875 . 103) (0.75 . 104) (0.78125 . 105) (0.8125 . 106) (0.84375 . 107)
+    (0.875 . 108) (0.90625 . 109) (0.9375 . 110) (0.96875 . 111) (1.0 . 112)
+    (1.0625 . 113) (1.125 . 114) (1.1875 . 115) (1.25 . 116) (1.3125 . 117)
+    (1.375 . 118) (1.4375 . 119) (1.5 . 120) (1.5625 . 121) (1.625 . 122)
+    (1.6875 . 123) (1.75 . 124) (1.8125 . 125) (1.875 . 126) (1.9375 . 127)
+    (-2.0 . 128) (-2.125 . 129) (-2.25 . 130) (-2.375 . 131) (-2.5 . 132)
+    (-2.625 . 133) (-2.75 . 134) (-2.875 . 135) (-3.0 . 136) (-3.125 . 137)
+    (-3.25 . 138) (-3.375 . 139) (-3.5 . 140) (-3.625 . 141) (-3.75 . 142)
+    (-3.875 . 143) (-4.0 . 144) (-4.25 . 145) (-4.5 . 146) (-4.75 . 147)
+    (-5.0 . 148) (-5.25 . 149) (-5.5 . 150) (-5.75 . 151) (-6.0 . 152)
+    (-6.25 . 153) (-6.5 . 154) (-6.75 . 155) (-7.0 . 156) (-7.25 . 157)
+    (-7.5 . 158) (-7.75 . 159) (-8.0 . 160) (-8.5 . 161) (-9.0 . 162)
+    (-9.5 . 163) (-10.0 . 164) (-10.5 . 165) (-11.0 . 166) (-11.5 . 167)
+    (-12.0 . 168) (-12.5 . 169) (-13.0 . 170) (-13.5 . 171) (-14.0 . 172)
+    (-14.5 . 173) (-15.0 . 174) (-15.5 . 175) (-16.0 . 176) (-17.0 . 177)
+    (-18.0 . 178) (-19.0 . 179) (-20.0 . 180) (-21.0 . 181) (-22.0 . 182)
+    (-23.0 . 183) (-24.0 . 184) (-25.0 . 185) (-26.0 . 186) (-27.0 . 187)
+    (-28.0 . 188) (-29.0 . 189) (-30.0 . 190) (-31.0 . 191) (-0.125 . 192)
+    (-0.1328125 . 193) (-0.140625 . 194) (-0.1484375 . 195) (-0.15625 . 196)
+    (-0.1640625 . 197) (-0.171875 . 198) (-0.1796875 . 199) (-0.1875 . 200)
+    (-0.1953125 . 201) (-0.203125 . 202) (-0.2109375 . 203) (-0.21875 . 204)
+    (-0.2265625 . 205) (-0.234375 . 206) (-0.2421875 . 207) (-0.25 . 208)
+    (-0.265625 . 209) (-0.28125 . 210) (-0.296875 . 211) (-0.3125 . 212)
+    (-0.328125 . 213) (-0.34375 . 214) (-0.359375 . 215) (-0.375 . 216)
+    (-0.390625 . 217) (-0.40625 . 218) (-0.421875 . 219) (-0.4375 . 220)
+    (-0.453125 . 221) (-0.46875 . 222) (-0.484375 . 223) (-0.5 . 224)
+    (-0.53125 . 225) (-0.5625 . 226) (-0.59375 . 227) (-0.625 . 228)
+    (-0.65625 . 229) (-0.6875 . 230) (-0.71875 . 231) (-0.75 . 232)
+    (-0.78125 . 233) (-0.8125 . 234) (-0.84375 . 235) (-0.875 . 236)
+    (-0.90625 . 237) (-0.9375 . 238) (-0.96875 . 239) (-1.0 . 240)
+    (-1.0625 . 241) (-1.125 . 242) (-1.1875 . 243) (-1.25 . 244)
+    (-1.3125 . 245) (-1.375 . 246) (-1.4375 . 247) (-1.5 . 248)
+    (-1.5625 . 249) (-1.625 . 250) (-1.6875 . 251) (-1.75 . 252)
+    (-1.8125 . 253) (-1.875 . 254) (-1.9375 . 255)))
+
+(defun vfp-mov-immed-encoding (immed)
+  (let ((imm8 (cdr (assoc immed *vfp-mov-immed-alist* :test #'eq))))
+    (unless imm8 (error "vmov immediate out of range!"))
+    (values (ldb (byte 4 4) imm8)
+	    (ldb (byte 4 0) imm8))))
+
+
 
 ;;;; Emitters
 
@@ -169,6 +241,16 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;; CCCC|00010010|imm12.......|0111|imm4| -- BKPT #imm16
 (define-bitfield-emitter emit-misc-inst 32
   (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
+
+;;; 3-register VFP data-processing instructions
+;;; CCCC|11100D00|Vn  |Vd  |101sNoM0|Vm  | VMLA
+(define-bitfield-emitter emit-vfp-3rdp-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 8 4) (byte 4 0))
+
+;;; CCCC|1101UD01|Rn  |Vd  |1010|imm8    | -- VLDR Sd, Rn +/-#imm8
+(define-bitfield-emitter emit-xls-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 4 8) (byte 8 0))
+
 
 
 ;; 
@@ -312,7 +394,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;; CCCC|010|1U001|1111|Rt  |immed12.....   | - LDR Rt, <label> (sp. of form1)
 (macrolet ((define-ls-instruction (name op dir)
              `(define-instruction ,name (segment src base offset &key (cnd :al)
-						 (index t) (add t) wback
+						 (index t) wback
 						 shift shift-op)
                 (:declare (type (or (integer -4096 4096) tn) offset))
                 (:delay 1)
@@ -325,15 +407,17 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
                 (:emitter
                  (let ((fld ,op))
                    (when index (setf fld (logior fld #b00010000)))
-                   (when add   (setf fld (logior fld #b00001000)))
                    (when wback (setf fld (logior fld #b00000010)))
                    (cond
                      ;; first form (immediate)
                      ((integerp offset)
+		      (if (>= offset 0)
+			  (setf fld (logior fld #b00001000))
+			  (setf offset (- offset)))
                       (emit-dp-imm-inst segment (cond-encoding cnd) fld
                                         (reg-tn-encoding base)
                                         (reg-tn-encoding src)
-                                        offset))
+                                        (ash offset -2)))
                      ;; second form (register)
                      ((register-p offset)
                       (setf fld (logior fld #b00100000))
@@ -409,6 +493,263 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
                    (dpb (cond-encoding cnd)
                         (byte 4 28)
                         (dpb #b1010 (byte 4 24) disp))))))))
+
+
+
+;;;;============================================================================
+;;;; A7.5 VFP Data Processing Instructions
+
+;;; Table A7-16 Three-register  VFP data-processing instructions
+;;;
+;;; CCCC|11100D00|Vn  |Vd  |101sNoM0|Vm  | VMLA
+(macrolet ((define-vfp-3rdp-instruction (name op1 op2 precision)
+	     `(define-instruction ,name (segment dest src1 src2
+						 &key (cnd :al))
+		(:delay 1)
+		(:cost 1)
+		(:dependencies (reads src1) (reads src2) (writes dest))
+		(:emitter
+		 (let ((fld1 ,op1)
+		       (fld2 ,op2)
+		       (freg-n (freg-tn-encoding src1))
+		       (freg-d (freg-tn-encoding dest))
+		       (freg-m (freg-tn-encoding src2))
+		       vn n vd d vm m)
+		   ,(ecase precision
+			   (:single '(setf
+				      vn (ldb (byte 4 1) freg-n)
+				      vd (ldb (byte 4 1) freg-d)
+				      vm (ldb (byte 4 1) freg-m)
+				      n (ldb (byte 1 0) freg-n)
+				      d (ldb (byte 1 0) freg-d)
+				      m (ldb (byte 1 0) freg-m)))
+			   (:double '(setf
+				      vn (ldb (byte 4 0) freg-n)
+				      vd (ldb (byte 4 0) freg-d)
+				      vm (ldb (byte 4 0) freg-m)
+				      n (ldb (byte 1 0) freg-n)
+				      d (ldb (byte 1 0) freg-d)
+				      m (ldb (byte 1 0) freg-m)
+				      fld2 (logior fld2 #b00010000))))
+		   (setf fld2 (logior fld2 (ash n 3)))
+		   (setf fld1 (logior fld1 (ash d 2)))
+		   (setf fld2 (logior fld2 (ash m 1)))
+		   (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+				       fld1 vn vd fld2 vm))))))
+  ;; single
+  (define-vfp-3rdp-instruction vmla.f32  #b11100000 #b10100000 :single)
+  (define-vfp-3rdp-instruction vmls.f32  #b11100000 #b10100100 :single)
+  (define-vfp-3rdp-instruction vnmla.f32 #b11100001 #b10100100 :single)
+  (define-vfp-3rdp-instruction vnmls.f32 #b11100001 #b10100000 :single)
+  (define-vfp-3rdp-instruction vnmul.f32 #b11100010 #b10100100 :single)
+  (define-vfp-3rdp-instruction vmul.f32  #b11100010 #b10100000 :single)
+  (define-vfp-3rdp-instruction vdiv.f32  #b11101000 #b10100000 :single)
+  ;; double
+  (define-vfp-3rdp-instruction vmla.f64  #b11100000 #b10100000 :double)
+  (define-vfp-3rdp-instruction vmls.f64  #b11100000 #b10100100 :double)
+  (define-vfp-3rdp-instruction vnmls.f64 #b11100001 #b10100000 :double)
+  (define-vfp-3rdp-instruction vnmla.f64 #b11100001 #b10100100 :double)
+  (define-vfp-3rdp-instruction vnmul.f64 #b11100010 #b10100100 :double)
+  (define-vfp-3rdp-instruction vmul.f64  #b11100010 #b10100000 :double)
+  (define-vfp-3rdp-instruction vdiv.f64  #b11101000 #b10100000 :single)
+  )
+
+;;; Table A7-17 Other VFP data-processing instructions, bar:
+;;; - vcvtb, vcvtt (not supported on the Pi)
+;;; - vcvt between floating-point and fixed-point (no fixed-point in sbcl)
+;;; - vmov (it has two encodings, immediate and register)
+;;; - vcmp and vcmpe with zero (other encoding)
+;;; the latter 2 cases are implemented further down
+;;;
+;;; CCCC|11101D11|0000|Vd  |101s01M0|Vm  | VMOV
+(macrolet ((define-vfp-odp-instruction (name op1 op2 op3 precision)
+	     `(define-instruction ,name (segment dest src &key (cnd :al))
+		(:delay 1)
+		(:cost 1)
+		(:dependencies (reads src) (writes dest))
+		(:emitter
+		 (let ((fld1 ,op1)
+		       (fld2 ,op3)
+		       (freg-d (freg-tn-encoding dest))
+		       (freg-m (freg-tn-encoding src))
+		       vd d vm m)
+		   ,(ecase precision
+			   (:single '(setf
+				      vd (ldb (byte 4 1) freg-d)
+				      vm (ldb (byte 4 1) freg-m)
+				      d (ldb (byte 1 0) freg-d)
+				      m (ldb (byte 1 0) freg-m)))
+			   (:double '(setf
+				      vd (ldb (byte 4 0) freg-d)
+				      vm (ldb (byte 4 0) freg-m)
+				      d (ldb (byte 1 0) freg-d)
+				      m (ldb (byte 1 0) freg-m)
+				      fld2 (logior fld2 #b00010000))))
+		   (setf fld1 (logior fld1 (ash d 2)))
+		   (setf fld2 (logior fld2 (ash m 1)))
+		   (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+				       fld1 ,op2 vd fld2 vm))))))
+  ;; single
+  (define-vfp-odp-instruction vabs.f32     #b11101011 #b0000 #b10101100 :single)
+  (define-vfp-odp-instruction vneg.f32     #b11101011 #b0001 #b10100100 :single)
+  (define-vfp-odp-instruction vsqrt.f32    #b11101011 #b0001 #b10101100 :single)
+  (define-vfp-odp-instruction vcmp.f32     #b11101011 #b0100 #b10100100 :single)
+  (define-vfp-odp-instruction vcmpe.f32    #b11101011 #b0100 #b10101100 :single)
+  (define-vfp-odp-instruction vcvt.f64.f32 #b11101011 #b0111 #b10101100 :single)
+  (define-vfp-odp-instruction vcvtr.u32.f32 #b11101011 #b1100 #b10100100
+			      :single)
+  (define-vfp-odp-instruction vcvtr.s32.f32 #b11101011 #b1101 #b10100100
+			      :single)
+  (define-vfp-odp-instruction vcvt.f32.u32 #b11101011 #b1000 #b10100100 :single)
+  (define-vfp-odp-instruction vcvt.f32.s32 #b11101011 #b1000 #b10101100 :single)
+  ;; double
+  (define-vfp-odp-instruction vabs.f64     #b11101011 #b0000 #b10101100 :double)
+  (define-vfp-odp-instruction vneg.f64     #b11101011 #b0001 #b10100100 :double)
+  (define-vfp-odp-instruction vsqrt.f64    #b11101011 #b0001 #b10101100 :double)
+  (define-vfp-odp-instruction vcmp.f64     #b11101011 #b0100 #b10100100 :double)
+  (define-vfp-odp-instruction vcmpe.f64    #b11101011 #b0100 #b10101100 :double)
+  (define-vfp-odp-instruction vcvt.f32.f64 #b11101011 #b0111 #b10101100 :double)
+  (define-vfp-odp-instruction vcvtr.u32.f64 #b11101011 #b1100 #b10100100
+			      :double)
+  (define-vfp-odp-instruction vcvtr.s32.f64 #b11101011 #b1101 #b10100100
+			      :double)
+  (define-vfp-odp-instruction vcvt.f64.u32 #b11101011 #b1000 #b10100100 :double)
+  (define-vfp-odp-instruction vcvt.f64.s32 #b11101011 #b1000 #b10101100 :double)
+  )
+
+;;; VMOV has two encodings: immediate-to-register and register-to-register
+;;; CCCC|11101D11|im4H|Vd  |101s0000|im4L| VMOV.F32 Sd, #imm8
+;;; CCCC|11101D11|0000|Vd  |101s01M0|Vm  | VMOV.F32 Sd, Sm
+(macrolet ((define-vfp-mov-instruction (name precision)
+	     `(define-instruction ,name (segment dest src &key (cnd :al))
+		(:delay 1)
+		(:cost 1)
+		(:dependencies (reads src) (writes dest))
+		(:emitter
+		 (let ((fld1 #b11101011)
+		       (fld2 #b10100000)
+		       (freg-d (freg-tn-encoding dest))
+		       freg-m vd d vm m)
+		   ,(ecase precision
+		      (:single '(setf
+				 vd (ldb (byte 4 1) freg-d)
+				 d (ldb (byte 1 0) freg-d)))
+		      (:double '(setf
+				 vd (ldb (byte 4 0) freg-d)
+				 d (ldb (byte 1 0) freg-d)
+				 fld2 (logior fld2 #b00010000))))
+		   (setf fld1 (logior fld1 (ash d 2)))
+		   (cond
+                     ;; first form (immediate)
+                     ((floatp src)
+		      (multiple-value-bind (imm4H imm4L)
+			  (vfp-mov-immed-encoding src)
+			(emit-vfp-3rdp-inst segment (cond-encoding cnd)
+					    fld1 imm4H vd fld2 imm4L)))
+                     ;; second form (register)
+                     ((register-p src)
+		      (setf freg-m (freg-tn-encoding src))
+		      ,(ecase precision
+			      (:single '(setf
+					 vm (ldb (byte 4 1) freg-m)
+					 m (ldb (byte 1 0) freg-m)))
+			      (:double '(setf
+					 vm (ldb (byte 4 0) freg-m)
+					 m (ldb (byte 1 0) freg-m))))
+		      (setf fld2 (logior fld2 (ash m 1)))
+		      (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+					  fld1 #b0000 vd fld2 vm))))))))
+  ;; single
+  (define-vfp-mov-instruction vmov.f32 :single)
+  ;; double
+  (define-vfp-mov-instruction vmov.f64 :double)
+  )
+
+;;; VCMP/VCMPE with zero has somewhat special encoding, not suitable for 
+;;; inclusion in the general case above.
+;;; In order to differentiate between the vcmp register-to-register and
+;;; vcmp register with 0.0, we give a different name to this inst.
+;;;
+;;; CCCC|11101D11|0101|Vd  |101sE100|0000| VCMP{E}<c>.F32 <Sd>, #0.0
+(macrolet ((define-vfp-vcmpz-instruction (name op1 precision)
+	     `(define-instruction ,name (segment dest &key (cnd :al))
+		(:delay 1)
+		(:cost 1)
+		(:dependencies (reads dest))
+		(:emitter
+		 (let ((fld1 #b11101011)
+		       (fld2 ,op1)
+		       (freg-d (freg-tn-encoding dest))
+		       vd d)
+		   ,(ecase precision
+		      (:single '(setf
+				 vd (ldb (byte 4 1) freg-d)
+				 d (ldb (byte 1 0) freg-d)))
+		      (:double '(setf
+				 vd (ldb (byte 4 0) freg-d)
+				 d (ldb (byte 1 0) freg-d)
+				 fld2 (logior fld2 #b00010000))))
+		   (setf fld1 (logior fld1 (ash d 2)))
+		   (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+				       fld1 #b0101 vd fld2 #b0000))))))
+  ;; single
+  (define-vfp-vcmpz-instruction %vcmp.f32  #b10100100 :single)
+  (define-vfp-vcmpz-instruction %vcmpe.f32 #b10101100 :single)
+  ;; double
+  (define-vfp-vcmpz-instruction %vcmp.f64  #b10100100 :double)
+  (define-vfp-vcmpz-instruction %vcmpe.f64 #b10101100 :double)
+  )
+
+
+;;;; End of A7.5
+;;;;============================================================================
+
+
+
+;;;=============================================================================
+;;; A7.6 Extension register load/store instructions
+;;; CCCC|1101UD01|Rn  |Vd  |1010|imm8    | -- VLDR Sd, Rn +/-#imm8
+
+(macrolet ((define-xls-instruction (name op op2 dir)
+             `(define-instruction ,name (segment src base offset
+						 &key (cnd :al))
+                (:declare (type (or (integer -4096 4096) tn) offset))
+                (:delay 1)
+                (:cost 1)
+                ,(ecase dir
+                        (:load '(:dependencies (writes src) (reads base)
+					      (reads :memory)))
+                        (:store '(:dependencies (reads src) (reads base)
+					       (writes :memory))))
+                (:emitter
+                 (let ((fld ,op)
+		       (freg (freg-tn-encoding src))
+		       vd d fld2)
+		   ,(ecase op2
+			   (:single '(setf vd (ldb (byte 4 1) freg)
+				      d (ldb (byte 1 0) freg)
+				      fld2 #b1010))
+			   (:double '(setf vd (ldb (byte 4 0) freg)
+				      d (ldb (byte 1 4) freg)
+				      fld2 #b1011)))
+		   (if (>= offset 0)
+		       (setf fld (logior fld #b00001000))
+		       (setf offset (- offset)))
+		   (setf fld (logior fld (ash d 2)))
+		   (emit-xls-inst segment (cond-encoding cnd) fld
+				  (reg-tn-encoding base)
+				  vd fld2 (ash offset -2)))))))
+  (define-xls-instruction vstr.32  #b11010000 :single :store)
+  (define-xls-instruction vldr.32  #b11010001 :single :load)
+  (define-xls-instruction vstr.64  #b11010000 :double :store)
+  (define-xls-instruction vldr.64  #b11010001 :double :load)
+  )
+
+
+;;; End of A7.6
+;;;=============================================================================
+
+
 
 ;;; Some more macros
 

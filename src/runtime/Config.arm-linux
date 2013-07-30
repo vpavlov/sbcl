@@ -30,6 +30,11 @@ OS_SRC = linux-os.c arm-linux-os.c
 LINKFLAGS += -Wl,--export-dynamic
 OS_LIBS = -ldl
 
+### This is needed in order to compile the floating point instructions
+### properly on the ARM RPI
+### -- VNP 2013-07-30
+CFLAGS += -mfpu=vfp3 -mfloat-abi=hard
+
 ifdef LISP_FEATURE_LARGEFILE
   CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64
 endif
