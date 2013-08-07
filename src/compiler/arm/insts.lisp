@@ -17,6 +17,10 @@
   (and (tn-p thing)
        (eq (sb-name (sc-sb (tn-sc thing))) 'registers)))
 
+(defun vfp-register-p (thing)
+  (and (tn-p thing)
+       (eq (sb-name (sc-sb (tn-sc thing))) 'float-registers)))
+
 
 ;; 
 ;; Printers for the various instruction arguments
@@ -543,6 +547,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (define-vfp-3rdp-instruction vnmls.f32 #b11100001 #b10100000 :single)
   (define-vfp-3rdp-instruction vnmul.f32 #b11100010 #b10100100 :single)
   (define-vfp-3rdp-instruction vmul.f32  #b11100010 #b10100000 :single)
+  (define-vfp-3rdp-instruction vadd.f32  #b11100011 #b10100000 :single)
+  (define-vfp-3rdp-instruction vsub.f32  #b11100011 #b10100100 :single)
   (define-vfp-3rdp-instruction vdiv.f32  #b11101000 #b10100000 :single)
   ;; double
   (define-vfp-3rdp-instruction vmla.f64  #b11100000 #b10100000 :double)
@@ -551,7 +557,9 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (define-vfp-3rdp-instruction vnmla.f64 #b11100001 #b10100100 :double)
   (define-vfp-3rdp-instruction vnmul.f64 #b11100010 #b10100100 :double)
   (define-vfp-3rdp-instruction vmul.f64  #b11100010 #b10100000 :double)
-  (define-vfp-3rdp-instruction vdiv.f64  #b11101000 #b10100000 :single)
+  (define-vfp-3rdp-instruction vadd.f64  #b11100011 #b10100000 :double)
+  (define-vfp-3rdp-instruction vsub.f64  #b11100011 #b10100100 :double)
+  (define-vfp-3rdp-instruction vdiv.f64  #b11101000 #b10100000 :double)
   )
 
 ;;; Table A7-17 Other VFP data-processing instructions, bar:
@@ -747,6 +755,58 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 
 
 ;;; End of A7.6
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A7.8 8,16, and 32-bit transfer between ARM core and extension registers
+;;;
+;;; TODO: implement VMOV from ARM to 1/2 of double-precision register and vv
+;;;
+(define-instruction vmov (segment dest src &key (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:dependencies (reads src) (writes dest))
+  (:emitter
+   (let (op vn n rt freg
+	    (fld1 #b11100000)
+	    (fld2 #b10100001))
+     (cond
+       ((and (register-p src) (vfp-register-p dest))
+	(setf op 0
+	      rt (reg-tn-encoding src)
+	      freg (freg-tn-encoding dest)))
+       ((and (register-p dest) (vfp-register-p src))
+	(setf op 1
+	      rt (reg-tn-encoding dest)
+	      freg (freg-tn-encoding src)))
+       (t (error "Wrong arguments to VMOV!")))
+     (setf vn (ldb (byte 4 1) freg) n (ldb (byte 1 0) freg)
+	   fld1 (logior fld1 op)
+	   fld2 (logior fld2 (ash n 2)))
+     (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+			 fld1 vn rt fld2 #b0000))))
+
+(define-instruction vmsr (segment src &key (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:dependencies (reads src))
+  (:emitter
+   (let ((rt (reg-tn-encoding src)))
+     (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+			 #b11101110 #b0001 rt #b10100001 #b0000))))
+
+(define-instruction vmrs (segment dest &key (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:dependencies (writes dest))
+  (:emitter
+   (let ((rt (reg-tn-encoding dest)))
+     (emit-vfp-3rdp-inst segment (cond-encoding cnd)
+			 #b11101111 #b0001 rt #b10100001 #b0000))))
+
+;;; End of A7.8
 ;;;=============================================================================
 
 

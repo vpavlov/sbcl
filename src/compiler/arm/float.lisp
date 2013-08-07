@@ -335,3 +335,58 @@
   (single-reg double-reg complex-single-reg complex-double-reg)
   (descriptor-reg))
 
+
+
+;;;; Arithmetic VOPs:
+
+(define-vop (float-op)
+  (:args (x) (y))
+  (:results (r))
+  (:policy :fast-safe)
+  (:note "inline float arithmetic")
+  (:vop-var vop)
+  (:save-p :compute-only))
+
+(macrolet ((frob (name sc ptype)
+             `(define-vop (,name float-op)
+                (:args (x :scs (,sc))
+                       (y :scs (,sc)))
+                (:results (r :scs (,sc)))
+                (:arg-types ,ptype ,ptype)
+                (:result-types ,ptype))))
+  (frob single-float-op single-reg single-float)
+  (frob double-float-op double-reg double-float))
+
+(macrolet ((frob (op sinst sname scost dinst dname dcost)
+             `(progn
+                (define-vop (,sname single-float-op)
+                  (:translate ,op)
+                  (:generator ,scost
+                    (inst ,sinst r x y)))
+                (define-vop (,dname double-float-op)
+                  (:translate ,op)
+                  (:generator ,dcost
+                    (inst ,dinst r x y))))))
+  (frob + vadd.f32 +/single-float 2 vadd.f64 +/double-float 2)
+  (frob - vsub.f32 -/single-float 2 vsub.f64 -/double-float 2)
+  (frob * vmul.f32 */single-float 4 vmul.f64 */double-float 5)
+  (frob / vdiv.f32 //single-float 12 vdiv.f64 //double-float 19))
+
+(macrolet ((frob (name inst translate sc type)
+             `(define-vop (,name)
+                (:args (x :scs (,sc)))
+                (:results (y :scs (,sc)))
+                (:translate ,translate)
+                (:policy :fast-safe)
+                (:arg-types ,type)
+                (:result-types ,type)
+                (:note "inline float arithmetic")
+                (:vop-var vop)
+                (:save-p :compute-only)
+                (:generator 1
+                  (note-this-location vop :internal-error)
+                  (inst ,inst y x)))))
+  (frob abs/single-float vabs.f32 abs single-reg single-float)
+  (frob abs/double-float vabs.f64 abs double-reg double-float)
+  (frob %negate/single-float vneg.f32 %negate single-reg single-float)
+  (frob %negate/double-float vneg.f64 %negate double-reg double-float))
