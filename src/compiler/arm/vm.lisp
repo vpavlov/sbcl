@@ -255,6 +255,13 @@
   (make-random-tn :kind :normal :sc (sc-or-lose 'unsigned-reg)
                   :offset thread-offset))
 
+;;; APSR_nzcv is encoded in some instructions as R15
+;;;
+(defparameter apsr-tn
+  (make-random-tn :kind :normal
+		  :sc (sc-or-lose 'any-reg)
+		  :offset 15))
+
 
 ;;;; Constants
 

@@ -390,3 +390,118 @@
   (frob abs/double-float vabs.f64 abs double-reg double-float)
   (frob %negate/single-float vneg.f32 %negate single-reg single-float)
   (frob %negate/double-float vneg.f64 %negate double-reg double-float))
+
+
+
+;;;; Comparison:
+
+(define-vop (float-compare)
+  (:args (x) (y))
+  (:conditional)
+  (:info target not-p)
+  (:variant-vars format yep nope)
+  (:policy :fast-safe)
+  (:note "inline float comparison")
+  (:vop-var vop)
+  (:save-p :compute-only)
+  (:generator 3
+    (note-this-location vop :internal-error)
+    (ecase format
+      (:single
+       (inst vcmp.f32 x y))
+      (:double
+       (inst vcmp.f64 x y)))
+    (inst vmrs apsr-tn)
+    (inst b target :cnd (if not-p nope yep))))
+
+(macrolet ((frob (name sc ptype)
+             `(define-vop (,name float-compare)
+                (:args (x :scs (,sc))
+                       (y :scs (,sc)))
+                (:arg-types ,ptype ,ptype))))
+  (frob single-float-compare single-reg single-float)
+  (frob double-float-compare double-reg double-float))
+
+(macrolet ((frob (translate yep nope sname dname)
+             `(progn
+                (define-vop (,sname single-float-compare)
+                  (:translate ,translate)
+                  (:variant :single ,yep ,nope))
+                (define-vop (,dname double-float-compare)
+                  (:translate ,translate)
+                  (:variant :double ,yep ,nope)))))
+  (frob < :lt :ge </single-float </double-float)
+  (frob > :gt :le >/single-float >/double-float)
+  (frob = :eq :ne eql/single-float eql/double-float))
+
+
+
+;;;; Conversion:
+
+(macrolet ((frob (name translate inst from-sc to-sc from-type to-type)
+             `(define-vop (,name)
+                (:args (x :scs (,from-sc)))
+                (:results (y :scs (,to-sc)))
+                (:arg-types ,from-type)
+                (:result-types ,to-type)
+                (:policy :fast-safe)
+                (:note "inline float coercion")
+                (:translate ,translate)
+                (:vop-var vop)
+                (:save-p :compute-only)
+                (:generator
+		 2
+		 ;; FIXME: not sure if this works with doubles
+		 ;; -- VNP 2013-08-08
+		 (inst vmov y x)
+		 (inst ,inst y y)))))
+  (frob %single-float/signed %single-float vcvt.f32.s32
+	signed-reg single-reg
+	signed-num single-float)
+  (frob %single-float/unsigned %single-float vcvt.f32.u32
+	unsigned-reg single-reg
+	unsigned-num single-float)
+  (frob %double-float/signed %double-float vcvt.f64.s32
+	signed-reg double-reg
+	signed-num double-float)
+  (frob %double-float/unsigned %double-float vcvt.f64.u32
+	unsigned-reg double-reg
+	unsigned-num double-float))
+
+(macrolet ((frob (name translate inst from-sc from-type to-sc to-type)
+             `(define-vop (,name)
+                (:args (x :scs (,from-sc)))
+                (:results (y :scs (,to-sc)))
+                (:arg-types ,from-type)
+                (:result-types ,to-type)
+                (:policy :fast-safe)
+                (:note "inline float coercion")
+                (:translate ,translate)
+                (:vop-var vop)
+                (:save-p :compute-only)
+                (:generator 2
+                  (note-this-location vop :internal-error)
+                  (inst ,inst y x)))))
+  (frob %single-float/double-float %single-float vcvt.f32.f64
+	double-reg double-float single-reg single-float)
+  (frob %double-float/single-float %double-float vcvt.f64.f32
+	single-reg single-float double-reg double-float))
+
+(macrolet ((frob (trans from-sc from-type inst)
+             `(define-vop (,(symbolicate trans "/" from-type))
+                (:args (x :scs (,from-sc)))
+                (:results (y :scs (signed-reg)))
+                (:arg-types ,from-type)
+                (:result-types signed-num)
+                (:translate ,trans)
+                (:policy :fast-safe)
+                (:note "inline float truncate")
+                (:vop-var vop)
+                (:save-p :compute-only)
+                (:generator 5
+                  (note-this-location vop :internal-error)
+		  (inst ,inst y x)))))
+  (frob %unary-truncate/single-float single-reg single-float vcvt.s32.f32)
+  (frob %unary-truncate/double-float double-reg double-float vcvt.s32.f64)
+  (frob %unary-round single-reg single-float vcvtr.s32.f32)
+  (frob %unary-round double-reg double-float vcvtr.s32.f64))

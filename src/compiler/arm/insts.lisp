@@ -480,23 +480,32 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 	 (imm4 (ldb (byte 4 0) imm16)))
      (emit-misc-inst #b1110 segment #b00010010 imm12 #b0111 imm4))))
 
-;; A5.5 Branch, branch with link and block data transfer
-(define-instruction b (segment where &key (cnd :al))
+
+
+;;;;============================================================================
+;;;; A5.5 Branch, branch with link and block data transfer
+
+(define-instruction b (segment target &key (cnd :al))
   (:emitter
-   (emit-chooser
-    segment 4 0
-    (lambda (segment posn delta-if-after)
-      (declare (ignore segment posn delta-if-after)))
-    (lambda (segment posn)
-      ;; @@@FIXME: this calculation maybe wrong, but I don't know yet, I
-      ;;           just produced it from the top of my head, following
-      ;;           whatever leads I got, but am not 100% sure that its fine
-      ;; --vnp 2013-05-17
-      (let ((disp (ash (- (label-position where) (+ posn 4)) -2)))
-        (emit-word segment
-                   (dpb (cond-encoding cnd)
-                        (byte 4 28)
-                        (dpb #b1010 (byte 4 24) disp))))))))
+   ;; FIXME: the target may be > 32 MB away, what do we do then?
+   (etypecase target
+     (fixup
+      (note-fixup segment :b target)
+      (emit-word segment
+		 (dpb (cond-encoding cnd) (byte 4 28)
+		      (dpb #b1010 (byte 4 24) 0))))
+     (label
+      (emit-back-patch
+       segment 4
+       #'(lambda (segment posn)
+	   (emit-word
+	    segment
+	    (dpb (cond-encoding cnd) (byte 4 28)
+		 (dpb #b1010 (byte 4 24)
+		      (ash (- (label-position target) posn) -2))))))))))
+
+;;;; End of A5.5
+;;;;============================================================================
 
 
 
@@ -608,6 +617,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 			      :single)
   (define-vfp-odp-instruction vcvtr.s32.f32 #b11101011 #b1101 #b10100100
 			      :single)
+  (define-vfp-odp-instruction vcvt.u32.f32 #b11101011 #b1100 #b10101100 :single)
+  (define-vfp-odp-instruction vcvt.s32.f32 #b11101011 #b1101 #b10101100 :single)
   (define-vfp-odp-instruction vcvt.f32.u32 #b11101011 #b1000 #b10100100 :single)
   (define-vfp-odp-instruction vcvt.f32.s32 #b11101011 #b1000 #b10101100 :single)
   ;; double
@@ -621,6 +632,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 			      :double)
   (define-vfp-odp-instruction vcvtr.s32.f64 #b11101011 #b1101 #b10100100
 			      :double)
+  (define-vfp-odp-instruction vcvt.u32.f64 #b11101011 #b1100 #b10101100 :double)
+  (define-vfp-odp-instruction vcvt.s32.f64 #b11101011 #b1101 #b10101100 :double)
   (define-vfp-odp-instruction vcvt.f64.u32 #b11101011 #b1000 #b10100100 :double)
   (define-vfp-odp-instruction vcvt.f64.s32 #b11101011 #b1000 #b10101100 :double)
   )
