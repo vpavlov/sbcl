@@ -505,3 +505,119 @@
   (frob %unary-truncate/double-float double-reg double-float vcvt.s32.f64)
   (frob %unary-round single-reg single-float vcvtr.s32.f32)
   (frob %unary-round double-reg double-float vcvtr.s32.f64))
+
+(define-vop (make-single-float)
+  (:args (bits :scs (signed-reg) :target res
+               :load-if (not (sc-is bits signed-stack))))
+  (:results (res :scs (single-reg)
+                 :load-if (not (sc-is res single-stack))))
+  (:temporary (:scs (signed-reg) :from (:argument 0) :to (:result 0)) temp)
+  (:arg-types signed-num)
+  (:result-types single-float)
+  (:translate make-single-float)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 2
+    (sc-case bits
+      (signed-reg
+       (sc-case res
+         (single-reg
+	  (inst vmov res bits))
+         (single-stack
+	  (inst str bits cfp-tn (frame-byte-offset (tn-offset res))))))
+      (signed-stack
+       (sc-case res
+         (single-reg
+	  (inst vldr.32 res cfp-tn (frame-byte-offset (tn-offset bits))))
+         (single-stack
+          (unless (location= bits res)
+	    (inst ldr temp cfp-tn (frame-byte-offset (tn-offset bits)))
+	    (inst str temp cfp-tn (frame-byte-offset (tn-offset res))))))))
+    ))
+
+(define-vop (make-double-float)
+  (:args (hi-bits :scs (signed-reg))
+         (lo-bits :scs (unsigned-reg)))
+  (:results (res :scs (double-reg)
+                 :load-if (not (sc-is res double-stack))))
+  (:temporary (:scs (double-stack)) temp)
+  (:arg-types signed-num unsigned-num)
+  (:result-types double-float)
+  (:translate make-double-float)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 2
+    (let ((stack-tn (sc-case res
+                      (double-stack res)
+                      (double-reg temp))))
+      (inst str hi-bits cfp-tn (frame-byte-offset (tn-offset stack-tn)))
+      (inst str lo-bits cfp-tn (frame-byte-offset (1+ (tn-offset stack-tn))))
+      (when (sc-is res double-reg)
+	(inst vldr.64 res cfp-tn (frame-byte-offset (tn-offset temp)))))))
+
+(define-vop (single-float-bits)
+  (:args (float :scs (single-reg descriptor-reg)
+                :load-if (not (sc-is float single-stack))))
+  (:results (bits :scs (signed-reg)
+                  :load-if (or (sc-is float descriptor-reg single-stack)
+                               (not (sc-is bits signed-stack)))))
+  (:arg-types single-float)
+  (:result-types signed-num)
+  (:translate single-float-bits)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 4
+    (sc-case bits
+      (signed-reg
+       (sc-case float
+         (single-reg
+	  (inst vmov bits float))
+	 (single-stack
+	  (inst ldr bits cfp-tn (frame-byte-offset (tn-offset float))))))
+      (signed-stack
+       (sc-case float
+         (single-reg
+	  (inst vstr.32 float cfp-tn (frame-byte-offset (tn-offset bits)))))))))
+
+(define-vop (double-float-high-bits)
+  (:args (float :scs (double-reg descriptor-reg)
+                :load-if (not (sc-is float double-stack))))
+  (:results (hi-bits :scs (signed-reg)))
+  (:temporary (:scs (double-stack)) stack-temp)
+  (:arg-types double-float)
+  (:result-types signed-num)
+  (:translate double-float-high-bits)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 5
+    (sc-case float
+      (double-reg
+       (inst vstr.64 float cfp-tn (frame-byte-offset (tn-offset stack-temp)))
+       (inst ldr hi-bits cfp-tn (frame-byte-offset (tn-offset stack-temp))))
+      (double-stack
+       (inst ldr hi-bits cfp-tn (frame-byte-offset (tn-offset float))))
+      (descriptor-reg
+       (loadw hi-bits float double-float-value-slot other-pointer-lowtag)))))
+
+(define-vop (double-float-low-bits)
+  (:args (float :scs (double-reg descriptor-reg)
+                :load-if (not (sc-is float double-stack))))
+  (:results (lo-bits :scs (unsigned-reg)))
+  (:temporary (:scs (double-stack)) stack-temp)
+  (:arg-types double-float)
+  (:result-types unsigned-num)
+  (:translate double-float-low-bits)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 5
+    (sc-case float
+      (double-reg
+       (inst vstr.64 float cfp-tn (frame-byte-offset (tn-offset stack-temp)))
+       (inst ldr lo-bits cfp-tn
+	     (frame-byte-offset (1+ (tn-offset stack-temp)))))
+      (double-stack
+       (inst ldr lo-bits cfp-tn (frame-byte-offset
+				 (1+ (tn-offset stack-temp)))))
+      (descriptor-reg
+       (loadw lo-bits float (1+ double-float-value-slot)
+	      other-pointer-lowtag)))))
