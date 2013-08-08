@@ -621,3 +621,150 @@
       (descriptor-reg
        (loadw lo-bits float (1+ double-float-value-slot)
 	      other-pointer-lowtag)))))
+
+
+;;;; Float mode hackery:
+
+(sb!xc:deftype float-modes () '(unsigned-byte 32))
+(defknown floating-point-modes () float-modes (flushable))
+(defknown ((setf floating-point-modes)) (float-modes) float-modes)
+
+(define-vop (floating-point-modes)
+  (:results (res :scs (unsigned-reg)))
+  (:result-types unsigned-num)
+  (:translate floating-point-modes)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 1
+	      (inst vmrs res)))
+
+(define-vop (set-floating-point-modes)
+  (:args (new :scs (unsigned-reg) :target res))
+  (:results (res :scs (unsigned-reg)))
+  (:arg-types unsigned-num)
+  (:result-types unsigned-num)
+  (:translate (setf floating-point-modes))
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 2
+	      (inst vmsr new)
+	      (move res new)))
+
+
+
+;;;; Complex float VOPs
+
+(define-vop (make-complex-single-float)
+  (:translate complex)
+  (:args (real :scs (single-reg) :target r
+               :load-if (not (location= real r)))
+         (imag :scs (single-reg) :to :save))
+  (:arg-types single-float single-float)
+  (:results (r :scs (complex-single-reg) :from (:argument 0)
+               :load-if (not (sc-is r complex-single-stack))))
+  (:result-types complex-single-float)
+  (:note "inline complex single-float creation")
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 3
+    (sc-case r
+      (complex-single-reg
+       (let ((r-real (complex-single-reg-real-tn r)))
+         (unless (location= real r-real)
+	   (inst vmov.f32 r-real real)))
+       (let ((r-imag (complex-single-reg-imag-tn r)))
+         (unless (location= imag r-imag)
+	   (inst vmov.f32 r-imag imag))))
+      (complex-single-stack
+       (unless (location= real r)
+	 (inst vstr.32 real cfp-tn (frame-byte-offset (tn-offset r))))
+       (inst vstr.32 imag cfp-tn (frame-byte-offset (1+ (tn-offset r))))))))
+
+(define-vop (make-complex-double-float)
+  (:translate complex)
+  (:args (real :scs (double-reg) :target r
+               :load-if (not (location= real r)))
+         (imag :scs (double-reg) :to :save))
+  (:arg-types double-float double-float)
+  (:results (r :scs (complex-double-reg) :from (:argument 0)
+               :load-if (not (sc-is r complex-double-stack))))
+  (:result-types complex-double-float)
+  (:note "inline complex double-float creation")
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 5
+    (sc-case r
+      (complex-double-reg
+       (let ((r-real (complex-double-reg-real-tn r)))
+         (unless (location= real r-real)
+	   (inst vmov.f64 r-real real)))
+       (let ((r-imag (complex-double-reg-imag-tn r)))
+         (unless (location= imag r-imag)
+	   (inst vmov.f64 r-imag imag))))
+      (complex-double-stack
+       (unless (location= real r)
+	 (inst vstr.64 real cfp-tn (frame-byte-offset (tn-offset r))))
+       (inst vstr.64 imag cfp-tn (frame-byte-offset (+ (tn-offset r) 2)))))))
+
+(define-vop (complex-single-float-value)
+  (:args (x :scs (complex-single-reg) :target r
+            :load-if (not (sc-is x complex-single-stack))))
+  (:arg-types complex-single-float)
+  (:results (r :scs (single-reg)))
+  (:result-types single-float)
+  (:variant-vars slot)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 3
+    (sc-case x
+      (complex-single-reg
+       (let ((value-tn (ecase slot
+                         (:real (complex-single-reg-real-tn x))
+                         (:imag (complex-single-reg-imag-tn x)))))
+         (unless (location= value-tn r)
+	   (inst vmov.f32 r value-tn))))
+      (complex-single-stack
+       (inst vldr.32 r cfp-tn (frame-byte-offset (+ (ecase slot (:real 0) (:imag 1))
+						(tn-offset x))))))))
+
+(define-vop (realpart/complex-single-float complex-single-float-value)
+  (:translate realpart)
+  (:note "complex single float realpart")
+  (:variant :real))
+
+(define-vop (imagpart/complex-single-float complex-single-float-value)
+  (:translate imagpart)
+  (:note "complex single float imagpart")
+  (:variant :imag))
+
+(define-vop (complex-double-float-value)
+  (:args (x :scs (complex-double-reg) :target r
+            :load-if (not (sc-is x complex-double-stack))))
+  (:arg-types complex-double-float)
+  (:results (r :scs (double-reg)))
+  (:result-types double-float)
+  (:variant-vars slot)
+  (:policy :fast-safe)
+  (:vop-var vop)
+  (:generator 3
+    (sc-case x
+      (complex-double-reg
+       (let ((value-tn (ecase slot
+                         (:real (complex-double-reg-real-tn x))
+                         (:imag (complex-double-reg-imag-tn x)))))
+         (unless (location= value-tn r)
+	   (inst vmov.f64 r value-tn))))
+      (complex-double-stack
+       (inst vldr.64 r cfp-tn
+	     (frame-byte-offset (+ (ecase slot (:real 0) (:imag 2))
+				   (tn-offset x))))))))
+
+(define-vop (realpart/complex-double-float complex-double-float-value)
+  (:translate realpart)
+  (:note "complex double float realpart")
+  (:variant :real))
+
+(define-vop (imagpart/complex-double-float complex-double-float-value)
+  (:translate imagpart)
+  (:note "complex double float imagpart")
+  (:variant :imag))
