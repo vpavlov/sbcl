@@ -189,6 +189,13 @@
   (def!constant csp-offset   13)
   (def!constant lr-offset    14))
 
+;;; A0 register and special encoding in some instructions
+;;;
+(defparameter a0-tn
+  (make-random-tn :kind :normal
+		  :sc (sc-or-lose 'any-reg)
+		  :offset a0-offset))
+
 ;;; Lisp-interior-pointer register.
 ;;;
 (defparameter lip-tn

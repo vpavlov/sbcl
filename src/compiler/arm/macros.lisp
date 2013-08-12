@@ -39,7 +39,7 @@
 ;;;
 (defmacro load-symbol (reg symbol)
   "Load a pointer to the static symbol into reg."
-  `(inst add ,reg null-tn :src2 (static-symbol-offset ,symbol)))
+  `(inst add ,reg null-tn (static-symbol-offset ,symbol)))
 
 ;;; LOAD-SYMBOL-FUNCTION, STORE-SYMBOL-FUNCTION,
 ;;; LOAD-SYMBOL-VALUE, STORE-SYMBOL-VALUE		-- interface.
@@ -124,7 +124,7 @@
    used as a temporary."
   `(progn
      (inst add ,lip ,function
-	   :src2 (- (* n-word-bytes simple-fun-code-offset) fun-pointer-lowtag))
+	   (- (* n-word-bytes simple-fun-code-offset) fun-pointer-lowtag))
      (inst bx ,lip)))
 
 ;;; LISP-RETURN -- Interface.
@@ -135,7 +135,7 @@
    and it has to be small enough for whatever instruction used in here."
   `(progn
      (inst add ,lip ,return-pc
-	   :src2 (- (* (1+ ,offset) n-word-bytes) other-pointer-lowtag))
+	   (- (* (1+ ,offset) n-word-bytes) other-pointer-lowtag))
      (inst bx ,lip)))
 
 ;;; EMIT-RETURN-PC -- Interface.
@@ -201,7 +201,7 @@
 ;;; overhead.
 
 (defun allocation-dynamic-extent (alloc-tn size lowtag)
-  (inst sub csp-tn size)
+  (inst sub csp-tn csp-tn size)
   ;; FIXME: SIZE _should_ be double-word aligned (suggested but
   ;; unfortunately not enforced by PAD-DATA-BLOCK and
   ;; WITH-FIXED-ALLOCATION), so that SP is always divisible by 8 (for
@@ -215,7 +215,7 @@
   ;; -- VNP, 2013-06-02
   ;;(inst and sp-tn (lognot lowtag-mask))
   (aver (not (location= alloc-tn csp-tn)))
-  (inst add alloc-tn csp-tn :src2 lowtag)
+  (inst add alloc-tn csp-tn lowtag)
   (values))
 
 (defun allocation-inline (alloc-tn size temp-tn temp2-tn)
@@ -237,8 +237,8 @@
 		       (* (1+ thread-alloc-region-slot) n-word-bytes))
     #!-sb-thread (inst ldr temp2-tn temp2-tn 4)
 
-    (inst add alloc-tn temp-tn)
-    (inst cmp alloc-tn temp2-tn)
+    (inst add alloc-tn alloc-tn temp-tn)
+    (inst cmp a0-tn alloc-tn temp2-tn)
     (inst b ok :cnd :ls)
 
     ;; free space is not enough; extend the allocation region
@@ -252,7 +252,7 @@
 		       (* thread-alloc-region-slot n-word-bytes))
     #!-sb-thread (inst lr temp2-tn (make-fixup "boxed_region" :foreign))
     #!-sb-thread (inst str alloc-tn temp2-tn)
-    (inst sub alloc-tn temp-tn)
+    (inst sub alloc-tn alloc-tn temp-tn)
 
     (emit-label done)
     (values)))
@@ -273,7 +273,7 @@
     (t
      (allocation-inline alloc-tn size temp-tn temp2-tn)))
   (when (and lowtag (not dynamic-extent))
-    (inst add alloc-tn alloc-tn :src2 lowtag))
+    (inst add alloc-tn alloc-tn lowtag))
   (values))
 
 (defmacro with-fixed-allocation ((result-tn temp-tn temp2-tn widetag size
@@ -286,13 +286,21 @@ randomly used by the body). The body is placed inside the PSEUDO-ATOMIC,
 and presumably initializes the object."
   (unless forms
     (bug "empty &body in WITH-FIXED-ALLOCATION"))
-  (once-only ((result-tn result-tn) (size size) (stack-allocate-p stack-allocate-p) (temp-tn temp-tn) (temp2-tn temp2-tn) (widetag widetag))
-    `(maybe-pseudo-atomic ,stack-allocate-p ,temp-tn
-       (allocation ,result-tn (pad-data-block ,size) ,temp-tn ,temp2-tn
-		   ,stack-allocate-p other-pointer-lowtag)
-       (inst lr ,temp-tn (logior (ash (1- ,size) n-widetag-bits) ,widetag))
-       (storew ,temp-tn ,result-tn 0 other-pointer-lowtag)
-       ,@forms)))
+  (once-only ((result-tn result-tn)
+	      (size size)
+	      (stack-allocate-p stack-allocate-p)
+	      (temp-tn temp-tn)
+	      (temp2-tn temp2-tn)
+	      (widetag widetag))
+	     `(maybe-pseudo-atomic
+	       ,stack-allocate-p ,temp-tn
+	       (allocation ,result-tn (pad-data-block ,size)
+			   ,temp-tn ,temp2-tn
+			   ,stack-allocate-p other-pointer-lowtag)
+	       (inst lr ,temp-tn (logior (ash (1- ,size) n-widetag-bits)
+					 ,widetag))
+	       (storew ,temp-tn ,result-tn 0 other-pointer-lowtag)
+	       ,@forms)))
 
 ;;;; error code
 (defun emit-error-break (vop kind code values)
@@ -367,7 +375,7 @@ and presumably initializes the object."
        #!-sb-thread
        (load-symbol-value ,temp-tn *pseudo-atomic-bits*)
 
-       (inst eors ,temp-tn cfp-tn)
+       (inst eors ,temp-tn ,temp-tn cfp-tn)
        (inst b ,label :cnd :eq)
        (inst bkpt pending-interrupt-trap)
        (emit-label ,label))))

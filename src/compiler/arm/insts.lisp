@@ -217,34 +217,44 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 (define-bitfield-emitter emit-word 32
   (byte 32 0))
 
-
-;;; Data processing (register) instruction emitter
-;;; Template:
-;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
+;;; A5.2.1 Data processing (register) instruction emitter
 (define-bitfield-emitter emit-dp-reg-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
   (byte 5 7) (byte 2 5) (byte 1 4) (byte 4 0))
 
-;;; Data processing (register-shifter register) instruction emitter
-;;; Template:
-;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
+;;; A5.2.2 Data processing (register-shifter register) instruction emitter
 (define-bitfield-emitter emit-dp-rsr-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
   (byte 4 8) (byte 1 7) (byte 2 5) (byte 1 4) (byte 4 0))
 
-;;; Data processing (immediate) instruction emitter
-;;; Template:
-;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+;;; A5.2.3 Data processing (immediate) instruction emitter
+;;; A5.2.11 MSR immediate and hints
 (define-bitfield-emitter emit-dp-imm-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
 
-(define-bitfield-emitter emit-a523-inst 32
-  (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
-  (byte 4 12) (byte 12 0))
+;;; A5.2.5 Multiply and Multiply-Accumulate instruction emitter
+;;; A5.2.6 Saturating addition and subtraction
+;;; A5.2.7 Halfword multiply and multiply-accumulate
+;;; A5.2.8 Extra load/store instructions
+;;; A5.2.9 Extra load/store instructions (unpriviledged)
+;;; A5.2.10 Synchronization primitives
+;;; A5.2.11 MSR immediate and hints
+(define-bitfield-emitter emit-mma-inst 32
+  (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
+  (byte 4 8) (byte 4 4) (byte 4 0))
 
 ;;; CCCC|00010010|imm12.......|0111|imm4| -- BKPT #imm16
 (define-bitfield-emitter emit-misc-inst 32
   (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
+
+
+
+
+
+
+(define-bitfield-emitter emit-a523-inst 32
+  (byte 4 28) (byte 3 25) (byte 5 20) (byte 4 16)
+  (byte 4 12) (byte 12 0))
 
 ;;; 3-register VFP data-processing instructions
 ;;; CCCC|11100D00|Vn  |Vd  |101sNoM0|Vm  | VMLA
@@ -252,7 +262,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 8 4) (byte 4 0))
 
 ;;; CCCC|1101UD01|Rn  |Vd  |1010|imm8    | -- VLDR Sd, Rn +/-#imm8
-(define-bitfield-emitter emit-xls-inst 32
+(define-bitfield-emitter emit-xrls-inst 32
   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 4 8) (byte 8 0))
 
 
@@ -266,21 +276,17 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;; A5.2.2. Data Processing (register-shifted register)
 ;;; A5.2.3. Data Processing (immediate)
 ;;;
-;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | -- EOR Rd, Rn, Rm, sh-op #shift
-;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | -- EOR Rd, Rn, Rm, sh-op Rs
-;;; CCCC|0010001|S|Rn  |Rd  |imm12           | -- EOR Rd, Rn, #const
+;;; CCCC|0000001|S|Rn  |Rd  |imm5  |tp|0|Rm  | EOR Rd, Rn, Rm, sh-op #shift
+;;; CCCC|0000001|S|Rn  |Rd  |Rs  |0|tp|1|Rm  | EOR Rd, Rn, Rm, sh-op Rs
+;;; CCCC|0010001|S|Rn  |Rd  |imm12           | EOR Rd, Rn, #const
 (macrolet ((define-dp-instruction (name op)
-             `(define-instruction ,name (segment dst src &key (cnd :al)
-                                                 src2 shift shift-op)
+             `(define-instruction ,name (segment dst src1 src2 &key (cnd :al)
+                                                 shift shift-op)
                 (:delay 1)
                 (:cost 1)
-                (:dependencies (reads src) (writes dst))
+                (:dependencies (reads src1) (reads src2) (writes dst))
                 (:emitter
-                 (let ((fld ,op)
-                       src1)
-                   (if src2
-                       (setf src1 src)
-                       (setf src1 dst src2 src))
+                 (let ((fld ,op))
                    (if shift-op
                        (cond
                          ;; first form (register)
@@ -350,22 +356,15 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (define-dp-instruction mvns  #b00011111)
   )
 
+
 ;; Instructions based on the %MOV/%MOVS templates with special values for he
 ;; shifter and operands.
 (macrolet ((mov-frob (name base)
              `(define-instruction-macro ,name (dst src &key (cnd :al))
-                `(inst ,,base ,dst (make-random-tn :kind :normal
-                                                   :sc (sc-or-lose 'any-reg)
-                                                   :offset 0)
-                       :cnd ,cnd
-                       :src2 ,src)))
+                `(inst ,,base ,dst a0-tn ,src :cnd ,cnd)))
            (shift-frob (name base shift-op)
              `(define-instruction-macro ,name (dst src shift &key (cnd :al))
-                `(inst ,,base ,dst (make-random-tn :kind :normal
-                                                   :sc (sc-or-lose 'any-reg)
-                                                   :offset 0)
-                       :cnd ,cnd
-                       :src2 ,src
+                `(inst ,,base ,dst a0-tn ,src :cnd ,cnd
                        :shift-op ,,shift-op
                        :shift ,shift))))
   (mov-frob   mov  '%mov)
@@ -385,11 +384,423 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 (define-instruction-macro rrxs (dst src &key (cnd :al))
   `(inst rors ,dst ,src 0 :cnd ,cnd))
 
+(macrolet ((frob (name fx op)
+             `(define-instruction ,name (segment dst src &key (cnd :al))
+                (:declare (type (or fixup (unsigned-byte 16)
+                                    (signed-byte 16)) src))
+                (:delay 1)
+                (:cost 1)
+                (:dependencies (writes dst))
+                (:emitter
+                 (when (typep src 'fixup)
+                   (note-fixup segment ,fx src)
+                   (setq src (or (fixup-offset src) 0)))
+                 (let ((imm4 (ldb (byte 4 12) src))
+                       (imm12 (ldb (byte 12 0) src)))
+                   (emit-a523-inst segment (cond-encoding cnd)
+                                   #b001 ,op imm4
+                                   (reg-tn-encoding dst) imm12))))))
+  (frob movw :l #b10000)
+  (frob movt :ha #b10100))
+
 ;;;
 ;;; End of A5.2.1, A5.2.2 and A5.2.3
 ;;;=============================================================================
 
 
+
+;;;=============================================================================
+;;; A5.2.4 Modified immediate constants in ARM instructions
+;;;
+;;; no instructions in this section
+;;;
+;;; End of A5.2.4
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.5 Multiply and multiply-accumulate
+;;;
+(macrolet ((define-mma-instruction (name op subtype)
+	     ;; note that in the :long instructions arguments semantics is:
+	     ;; dest is dest/high (RdHi)
+	     ;; src3 is dest/low (RdLo)
+	     ;; src1 is src2 (Rm)
+	     ;; src2 is src1 (Rn)
+             `(define-instruction ,name (segment cnd dest src1 src2 src3)
+                (:delay 1)
+                (:cost 1)
+		,(ecase subtype
+			(:regular
+			 '(:dependencies (reads src1) (reads src2) (reads src3)
+			   (writes dest)))
+			(:long
+			 '(:dependencies (reads dest) (reads src1) (reads src2)
+			   (reads src3) (writes dest) (writes src1))))
+                (:emitter (emit-mma-inst segment
+					 (cond-encoding cnd)
+					 ,op
+					 (reg-tn-encoding dest)
+					 (reg-tn-encoding src3)
+					 (reg-tn-encoding src2)
+					 #b1001
+					 (reg-tn-encoding src1))))))
+  (define-mma-instruction %mul   #b00000000 :regular)
+  (define-mma-instruction %muls  #b00000001 :regular)
+  (define-mma-instruction mla    #b00000010 :regular)
+  (define-mma-instruction mlas   #b00000011 :regular)
+  (define-mma-instruction umaal  #b00000100 :long)
+  (define-mma-instruction mls    #b00000110 :regular)
+  (define-mma-instruction umull  #b00001000 :long)
+  (define-mma-instruction umulls #b00001001 :long)
+  (define-mma-instruction umlal  #b00001010 :long)
+  (define-mma-instruction umlals #b00001011 :long)
+  (define-mma-instruction smull  #b00001100 :long)
+  (define-mma-instruction smulls #b00001101 :long)
+  (define-mma-instruction smlal  #b00001110 :long)
+  (define-mma-instruction smlals #b00001111 :long))
+
+(define-instruction-macro mul (dst src1 src2 &key (cnd :al))
+  `(inst %mul ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro muls (dst src1 src2 &key (cnd :al))
+  `(inst %muls ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+;;;
+;;; End of A5.2.5
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.6 Saturating addition and subtraction
+(macrolet ((define-sas-instruction (name op)
+             `(define-instruction ,name (segment cnd dest src1 src2)
+                (:delay 1)
+                (:cost 1)
+		(:dependencies (reads src1) (reads src2) (writes dest))
+                (:emitter
+		 (emit-mma-inst segment
+				(cond-encoding cnd)
+				,op
+				(reg-tn-encoding src2)
+				(reg-tn-encoding dest)
+				#b0000
+				#b0101
+				(reg-tn-encoding src1))))))
+  (define-sas-instruction qadd  #b00010000)
+  (define-sas-instruction qsub  #b00010010)
+  (define-sas-instruction qdadd #b00010100)
+  (define-sas-instruction qdsub #b00010110))
+;;;
+;;; End of A5.2.6
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.7 Halfword multiply and multiply-accumulate
+;;;
+(macrolet ((define-hwmma-instruction (name op1 op2)
+             `(define-instruction ,name (segment cnd dest src1 src2 src3)
+                (:delay 1)
+                (:cost 1)
+		(:dependencies (reads src1) (reads src2) (reads src3)
+			       (writes dest))
+                (:emitter (emit-mma-inst segment
+					 (cond-encoding cnd)
+					 ,op1
+					 (reg-tn-encoding dest)
+					 (reg-tn-encoding src3)
+					 (reg-tn-encoding src2)
+					 ,op2
+					 (reg-tn-encoding src1))))))
+  (define-hwmma-instruction smlabb #b00010000 #b1000)
+  (define-hwmma-instruction smlabt #b00010000 #b1100)
+  (define-hwmma-instruction smlatb #b00010000 #b1010)
+  (define-hwmma-instruction smlatt #b00010000 #b1110)
+
+  (define-hwmma-instruction smlawb #b00010010 #b1000)
+  (define-hwmma-instruction smlawt #b00010010 #b1100)
+
+  (define-hwmma-instruction %smulwb #b00010010 #b1010)
+  (define-hwmma-instruction %smulwt #b00010010 #b1110)
+
+  (define-hwmma-instruction %smulbb #b00010110 #b1000)
+  (define-hwmma-instruction %smulbt #b00010110 #b1100)
+  (define-hwmma-instruction %smultb #b00010110 #b1010)
+  (define-hwmma-instruction %smultt #b00010110 #b1110))
+
+(define-instruction-macro smulwb (dst src1 src2 &key (cnd :al))
+  `(inst %smulwb ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro smulwt (dst src1 src2 &key (cnd :al))
+  `(inst %smulwt ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro smulbb (dst src1 src2 &key (cnd :al))
+  `(inst %smulbb ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro smulbt (dst src1 src2 &key (cnd :al))
+  `(inst %smulbt ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro smultb (dst src1 src2 &key (cnd :al))
+  `(inst %smultb ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+
+(define-instruction-macro smultt (dst src1 src2 &key (cnd :al))
+  `(inst %smultt ,dst ,src1 ,src2 a0-tn :cnd ,cnd))
+;;;
+;;; End of A5.2.7
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.8 Extra load/store instructions
+;;;
+(macrolet ((define-xls-instruction (name op1 op2 dir)
+             `(define-instruction ,name (segment src base offset &key (cnd :al)
+						 (index t) wback)
+                (:delay 1)
+                (:cost 1)
+                ,(ecase dir
+                        (:load '(:dependencies (writes src) (reads base)
+				 (reads :memory)))
+                        (:store '(:dependencies (reads src) (reads base)
+				  (writes :memory))))
+                (:emitter
+                 (let ((fld ,op1))
+                   (when index (setf fld (logior fld #b00010000)))
+                   (when wback (setf fld (logior fld #b00000010)))
+                   (cond
+		     ;; first form (register)
+		     ((register-p offset)
+                      (emit-mma-inst segment (cond-encoding cnd) fld
+				     (reg-tn-encoding base)
+				     (reg-tn-encoding src)
+				     #b0000
+				     ,op2
+				     (reg-tn-encoding offset)))
+                     ;; second form (immediate)
+                     ((integerp offset)
+		      (setf fld (logior fld #b00000100))
+		      (if (>= offset 0)
+			  (setf fld (logior fld #b00001000))
+			  (setf offset (- offset)))
+                      (emit-mma-inst segment (cond-encoding cnd) fld
+				     (reg-tn-encoding base)
+				     (reg-tn-encoding src)
+				     (ldb (byte 4 4) (ash offset -24))
+				     ,op2
+				     (ldb (byte 4 0) (ash offset -24))))
+                     (t (error "Bad offset operand in ~a!" ',name))))))))
+  (define-xls-instruction strh   #b00000000 #b1011 :store)
+  (define-xls-instruction ldrh   #b00000001 #b1011 :load)
+  (define-xls-instruction ldrd   #b00000000 #b1101 :load)
+  (define-xls-instruction ldrsb  #b00000001 #b1101 :load)
+  (define-xls-instruction strd   #b00000000 #b1111 :store)
+  (define-xls-instruction ldrsh  #b00000001 #b1111 :load))
+;;;
+;;; End of A5.2.8
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.9 Extra load/store instructions (unprivileged)
+;;;
+(macrolet ((define-xlsu-instruction (name op1 op2 dir)
+             `(define-instruction ,name (segment src base offset &key (cnd :al))
+                (:delay 1)
+                (:cost 1)
+                ,(ecase dir
+                        (:load '(:dependencies (writes src) (reads base)
+				 (reads :memory)))
+                        (:store '(:dependencies (reads src) (reads base)
+				  (writes :memory))))
+                (:emitter
+                 (let ((fld ,op1))
+                   (cond
+		     ;; first form (register)
+		     ((register-p offset)
+                      (emit-mma-inst segment (cond-encoding cnd) fld
+				     (reg-tn-encoding base)
+				     (reg-tn-encoding src)
+				     #b0000
+				     ,op2
+				     (reg-tn-encoding offset)))
+                     ;; second form (immediate)
+                     ((integerp offset)
+		      (setf fld (logior fld #b00000100))
+		      (if (>= offset 0)
+			  (setf fld (logior fld #b00001000))
+			  (setf offset (- offset)))
+                      (emit-mma-inst segment (cond-encoding cnd) fld
+				     (reg-tn-encoding base)
+				     (reg-tn-encoding src)
+				     (ldb (byte 4 4) (ash offset -24))
+				     ,op2
+				     (ldb (byte 4 0) (ash offset -24))))
+                     (t (error "Bad offset operand in ~a!" ',name))))))))
+  (define-xlsu-instruction strht  #b00000010 #b1011 :store)
+  (define-xlsu-instruction ldrht  #b00000011 #b1011 :load)
+  (define-xlsu-instruction ldrsbt #b00000011 #b1101 :load)
+  (define-xlsu-instruction ldrsht #b00000011 #b1111 :load))
+;;;
+;;; End of A5.2.9
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.10 Synchronization primitives
+;;;
+(macrolet ((define-sp-instruction (name op1 op2)
+             `(define-instruction ,name (segment r1 r2 r3 &key (cnd :al))
+                (:delay 1)
+                (:cost 1)
+		(:dependencies (writes r1) (reads r2) (reads :memory))
+                (:emitter
+		 (emit-mma-inst segment (cond-encoding cnd) ,op1
+				(reg-tn-encoding r3)
+				(reg-tn-encoding r1)
+				,op2
+				#b1001
+				(reg-tn-encoding r2))))))
+  (define-sp-instruction swp     #b00010000 #b0000)
+  (define-sp-instruction swpb    #b00010100 #b0000)
+  (define-sp-instruction strex   #b00011000 #b1111)
+  (define-sp-instruction %ldrex  #b00011001 #b1111)
+  (define-sp-instruction strexd  #b00011010 #b1111)
+  (define-sp-instruction %ldrexd #b00011011 #b1111)
+  (define-sp-instruction strexb  #b00011100 #b1111)
+  (define-sp-instruction %ldrexb #b00011101 #b1111)
+  (define-sp-instruction strexh  #b00011110 #b1111)
+  (define-sp-instruction %ldrexh #b00011111 #b1111)
+)
+
+(define-instruction-macro ldrex (r3 r1 &key (cnd :al))
+  `(inst %ldrex ,r1 a0-tn ,r3 :cnd ,cnd))
+
+(define-instruction-macro ldrexd (r3 r1 &key (cnd :al))
+  `(inst %ldrexd ,r1 a0-tn ,r3 :cnd ,cnd))
+
+(define-instruction-macro ldrexb (r3 r1 &key (cnd :al))
+  `(inst %ldrexb ,r1 a0-tn ,r3 :cnd ,cnd))
+
+(define-instruction-macro ldrexh (r3 r1 &key (cnd :al))
+  `(inst %ldrexh ,r1 a0-tn ,r3 :cnd ,cnd))
+;;;
+;;; End of A5.2.10
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.11 MSR (immediate) and hints
+;;;
+(macrolet ((define-hint-instruction (name op)
+             `(define-instruction ,name (segment option &key (cnd :al))
+                (:delay 1)
+                (:cost 1)
+                (:emitter
+		 (emit-mma-inst segment (cond-encoding cnd)
+				#b00110010 #b0000
+				#b1111 #b0000
+				,op option)))))
+  (define-hint-instruction %nop   #b0000)
+  (define-hint-instruction %yield #b0000)
+  (define-hint-instruction %wfe   #b0000)
+  (define-hint-instruction %wfi   #b0000)
+  (define-hint-instruction %sev   #b0000)
+  (define-hint-instruction dbg    #b1111))
+
+(define-instruction-macro nop (&key (cnd :al))
+  `(inst %nop #b0000 :cnd ,cnd))
+
+(define-instruction-macro yield (&key (cnd :al))
+  `(inst %yield #b0001 :cnd ,cnd))
+
+(define-instruction-macro wfe (&key (cnd :al))
+  `(inst %wfe #b0010 :cnd ,cnd))
+
+(define-instruction-macro wfi (&key (cnd :al))
+  `(inst %wfi #b0011 :cnd ,cnd))
+
+(define-instruction-macro sev (&key (cnd :al))
+  `(inst %sev #b0100 :cnd ,cnd))
+
+(define-instruction msr (segment rn-or-imm mask &key (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:emitter
+   (cond
+     ((register-p rn-or-imm)
+      ;; A5.2.12 Miscelaneous instructions MSR (register)
+      (emit-dp-reg-inst segment (cond-encoding cnd)
+		    #b00010010
+		    (ash mask 2)
+		    #b1111  #b00000 #b00 #b0
+		    (reg-tn-encoding rn-or-imm)))
+     ((integerp rn-or-imm)
+      (emit-dp-imm-inst segment (cond-encoding cnd)
+			#b00110010
+			(ash mask 2)
+			#b1111
+			(immed12-encoding rn-or-imm))))))
+;;;
+;;; End of A5.2.11
+;;;=============================================================================
+
+
+
+;;;=============================================================================
+;;; A5.2.12 Miscellaneous instructions
+;;;
+(define-instruction mrs (segment rd &key (cnd :al))
+  (:delay 1)
+  (:cost 1)
+  (:emitter
+   (emit-dp-imm-inst segment (cond-encoding cnd)
+		     #b00010000
+		     #b1111
+		     (reg-tn-encoding rd)
+		     #b000000000000)))
+
+(macrolet ((define-misc-instruction (name op1 op2)
+             `(define-instruction ,name (segment rm &key (cnd :al))
+		(:delay 1)
+		(:cost 1)
+                (:emitter
+                 (emit-dp-reg-inst segment (cond-encoding cnd)
+				   #b00010010 #b1111 #b1111 #b11110
+				   ,op1 ,op2 (reg-tn-encoding rm)))))
+           )
+  (define-misc-instruction bx  #b00 #b1)
+  (define-misc-instruction bxj #b01 #b0)
+  (define-misc-instruction blx #b01 #b1))
+
+(define-instruction clz (segment cnd rd rm)
+  (:delay 1)
+  (:cost 1)
+  (:emitter
+   (emit-mma-inst segment (cond-encoding cnd)
+		  #b00010110 #b1111 (reg-tn-encoding rd)
+		  #b1111 #b0001 (reg-tn-encoding rm))))
+
+(define-instruction bkpt (segment imm16)
+  (:delay 1)
+  (:cost 1)
+  (:emitter
+   (let ((imm12 (ldb (byte 12 4) imm16))
+	 (imm4 (ldb (byte 4 0) imm16)))
+     (emit-misc-inst segment #b1110 #b00010010 imm12 #b0111 imm4))))
+
+;;;
+;;; End of A5.2.12
+;;;=============================================================================
+
+
+
 ;;;=============================================================================
 ;;; A5.3 Load/store word and unsigned byte
 ;;; CCCC|01A|op1  |Rn  |...........  |B|....| - template
@@ -435,50 +846,10 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (define-ls-instruction str  #b01000000 :store)
   (define-ls-instruction strb #b01000100 :store)
   (define-ls-instruction ldr  #b01000001 :load)
-  (define-ls-instruction ldrb #b01000101 :load)
-  )
+  (define-ls-instruction ldrb #b01000101 :load))
 
 ;;; End of A5.3
 ;;;=============================================================================
-
-
-(macrolet ((frob (name fx op)
-             `(define-instruction ,name (segment dst src &key (cnd :al))
-                (:declare (type (or fixup (unsigned-byte 16)
-                                    (signed-byte 16)) src))
-                (:delay 1)
-                (:cost 1)
-                (:dependencies (writes dst))
-                (:emitter
-                 (when (typep src 'fixup)
-                   (note-fixup segment ,fx src)
-                   (setq src (or (fixup-offset src) 0)))
-                 (let ((imm4 (ldb (byte 4 12) src))
-                       (imm12 (ldb (byte 12 0) src)))
-                   (emit-a523-inst segment (cond-encoding cnd)
-                                   #b001 ,op imm4
-                                   (reg-tn-encoding dst) imm12))))))
-  (frob movw :l #b10000)
-  (frob movt :ha #b10100))
-
-;; A5.2.12 Miscellaneous instructions
-(macrolet (
-           (define-misc-instruction (name op1 op2)
-             `(define-instruction ,name (segment rm &key (cnd :al))
-                (:emitter
-                 (emit-dp-reg-inst segment (cond-encoding cnd)
-                                 #b00010010 #b1111 #b1111 #b11110
-                                 ,op1 ,op2 (reg-tn-encoding rm)))))
-           )
-  (define-misc-instruction bx  #b00 #b1)
-  (define-misc-instruction bxj #b01 #b0)
-  (define-misc-instruction blx #b01 #b1))
-
-(define-instruction bkpt (segment imm16)
-  (:emitter
-   (let ((imm12 (ldb (byte 12 4) imm16))
-	 (imm4 (ldb (byte 4 0) imm16)))
-     (emit-misc-inst #b1110 segment #b00010010 imm12 #b0111 imm4))))
 
 
 
@@ -718,10 +1089,7 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
   (define-vfp-vcmpz-instruction %vcmpe.f32 #b10101100 :single)
   ;; double
   (define-vfp-vcmpz-instruction %vcmp.f64  #b10100100 :double)
-  (define-vfp-vcmpz-instruction %vcmpe.f64 #b10101100 :double)
-  )
-
-
+  (define-vfp-vcmpz-instruction %vcmpe.f64 #b10101100 :double))
 ;;;; End of A7.5
 ;;;;============================================================================
 
@@ -730,8 +1098,8 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 ;;;=============================================================================
 ;;; A7.6 Extension register load/store instructions
 ;;; CCCC|1101UD01|Rn  |Vd  |1010|imm8    | -- VLDR Sd, Rn +/-#imm8
-
-(macrolet ((define-xls-instruction (name op op2 dir)
+;;;
+(macrolet ((define-xrls-instruction (name op op2 dir)
              `(define-instruction ,name (segment src base offset
 						 &key (cnd :al))
                 (:declare (type (or (integer -4096 4096) tn) offset))
@@ -757,16 +1125,13 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 		       (setf fld (logior fld #b00001000))
 		       (setf offset (- offset)))
 		   (setf fld (logior fld (ash d 2)))
-		   (emit-xls-inst segment (cond-encoding cnd) fld
+		   (emit-xrls-inst segment (cond-encoding cnd) fld
 				  (reg-tn-encoding base)
 				  vd fld2 (ash offset -2)))))))
-  (define-xls-instruction vstr.32  #b11010000 :single :store)
-  (define-xls-instruction vldr.32  #b11010001 :single :load)
-  (define-xls-instruction vstr.64  #b11010000 :double :store)
-  (define-xls-instruction vldr.64  #b11010001 :double :load)
-  )
-
-
+  (define-xrls-instruction vstr.32  #b11010000 :single :store)
+  (define-xrls-instruction vldr.32  #b11010001 :single :load)
+  (define-xrls-instruction vstr.64  #b11010000 :double :store)
+  (define-xrls-instruction vldr.64  #b11010001 :double :load))
 ;;; End of A7.6
 ;;;=============================================================================
 
@@ -898,14 +1263,13 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 	    segment 4
 	    #'(lambda (segment posn)
 		(assemble (segment vop)
-			  (inst add dst src
-				:src2 (funcall calc label posn 0)))))
+			  (inst add dst src (funcall calc label posn 0)))))
            t)))
    #'(lambda (segment posn)
        (let ((delta (funcall calc label posn 0)))
          (assemble (segment vop)
 		   (inst lr temp delta)
-                   (inst add dst src :src2 temp))))))
+                   (inst add dst src temp))))))
 
 ;; code = lip - header - label-offset + other-pointer-tag
 (define-instruction compute-code-from-lip (segment dst src label temp)
@@ -949,348 +1313,6 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
                       #'(lambda (label posn delta-if-after)
                           (+ (label-position label posn delta-if-after)
                              (component-header-length))))))
-
-;; 
-;; ;;; Instruction formats and corresponding emitters
-
-
-;; (define-bitfield-emitter emit-a525-inst 32
-;;   (byte 4 28) (byte 4 24) (byte 4 20) (byte 4 16) (byte 4 12)
-;;   (byte 4 8) (byte 4 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a526-inst 32
-;;   (byte 4 28) (byte 5 23) (byte 2 21) (byte 1 20)
-;;   (byte 4 16) (byte 4 12) (byte 8 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a527-inst 32
-;;   (byte 4 28) (byte 5 23) (byte 2 21) (byte 1 20)
-;;   (byte 4 16) (byte 4 12) (byte 4 8) (byte 4 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a528-inst 32
-;;   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12)
-;;   (byte 4 8) (byte 4 4) (byte 4 0))
-
-;; (define-bitfield-emitter emit-a5211-inst 32
-;;   (byte 4 28) (byte 8 20) (byte 4 16) (byte 4 12) (byte 12 0))
-
-;; (define-bitfield-emitter emit-a5212-inst 32
-;;   (byte 4 28) (byte 8 20) (byte 12 8) (byte 4 4) (byte 4 0))
-
-
-
-;; ;; A5.2.5 Multiply and multiply-accumulate -- 14 insts
-;; (macrolet (
-;;            ;; MUL Rd, Rn, Rm
-;;            (define-a525-subtype1-instruction (name op)
-;;              `(define-instruction ,name (segment cnd rd rn rm)
-;;                 (:emitter (emit-a525-inst segment (conditional-opcode cnd)
-;;                                           #b0000 ,op
-;;                                           (reg-encode rd) #b0000
-;;                                           (reg-encode rm)
-;;                                           #b1001
-;;                                           (reg-encode rn)))))
-
-;;            ;; instructions like:
-;;            ;; MLA Rd, Rn, Rm, Ra
-;;            (define-a525-subtype2-instruction (name op)
-;;              `(define-instruction ,name (segment cnd rd rn rm ra)
-;;                 (:emitter (emit-a525-inst segment (conditional-opcode cnd)
-;;                                           #b0000 ,op
-;;                                           (reg-encode rd)
-;;                                           (reg-encode ra)
-;;                                           (reg-encode rm)
-;;                                           #b1001
-;;                                           (reg-encode rn)))))
-
-;;            ;; instructions like:
-;;            ;; UMAAL RdLo, RdHi, Rn, Rm
-;;            (define-a525-subtype3-instruction (name op)
-;;              `(define-instruction ,name (segment cnd rdlo rdhi rn rm)
-;;                 (:emitter (emit-a525-inst segment (conditional-opcode cnd)
-;;                                           #b0000 ,op
-;;                                           (reg-encode rdhi)
-;;                                           (reg-encode rdlo)
-;;                                           (reg-encode rm)
-;;                                           #b1001
-;;                                           (reg-encode rn)))))
-;;            )
-;;   (define-a525-subtype1-instruction mul    #b0000)
-;;   (define-a525-subtype1-instruction muls   #b0001)
-;;   (define-a525-subtype2-instruction mla    #b0010)
-;;   (define-a525-subtype2-instruction mlas   #b0011)
-;;   (define-a525-subtype3-instruction umaal  #b0100)
-;;                                         ;; #b0101  undefined
-;;   (define-a525-subtype2-instruction mls    #b0110)
-;;                                         ;; #b0111  undefined
-;;   (define-a525-subtype3-instruction umull  #b1000)
-;;   (define-a525-subtype3-instruction umulls #b1001)
-;;   (define-a525-subtype3-instruction umlal  #b1010)
-;;   (define-a525-subtype3-instruction umlals #b1011)
-;;   (define-a525-subtype3-instruction smull  #b1100)
-;;   (define-a525-subtype3-instruction smulls #b1101)
-;;   (define-a525-subtype3-instruction smlal  #b1110)
-;;   (define-a525-subtype3-instruction smlals #b1111))
-
-
-;; ;; A5.2.6 Saturating addition and substraction -- 4 insts
-;; (macrolet (
-;;            ;; QADD Rd, Rm, Rn
-;;            (define-a526-instruction (name op)
-;;              `(define-instruction ,name (segment cnd rd rn rm)
-;;                 (:emitter (emit-a526-inst segment (conditional-opcode cnd)
-;;                                           #b00010 ,op #b0
-;;                                           (reg-encode rn)
-;;                                           (reg-encode rd)
-;;                                           #b00000101
-;;                                           (reg-encode rm)))))
-;;            )
-;;   (define-a526-instruction qadd #b00)
-;;   (define-a526-instruction qsub #b01)
-;;   (define-a526-instruction qdadd #b10)
-;;   (define-a526-instruction qdsub #b11))
-
-
-;; ;; A5.2.7 Halfword multiply and multiply-accumulate -- 16 insts
-;; (macrolet (
-;;            ;; SMLABB Rd, Rn, Rm, Ra
-;;            ;; SMLAWB Rd, Rn, Rm, Ra
-;;            (define-a527-subtype1-instruction (name op1 op2)
-;;              `(define-instruction ,name (segment cnd rd rn rm ra)
-;;                 (:emitter (emit-a527-inst segment (conditional-opcode cnd)
-;;                                           #b00010 ,op1 #b0
-;;                                           (reg-encode rd)
-;;                                           (reg-encode ra)
-;;                                           (reg-encode rm)
-;;                                           ,op2
-;;                                           (reg-encode rn)))))
-
-;;            ;; SMULWB Rd, Rn, Rm
-;;            ;; SMULBB Rd, Rn, Rm
-;;            (define-a527-subtype2-instruction (name op1 op2)
-;;              `(define-instruction ,name (segment cnd rd rn rm)
-;;                 (:emitter (emit-a527-inst segment (conditional-opcode cnd)
-;;                                           #b00010 ,op1 #b0
-;;                                           (reg-encode rd)
-;;                                           #b0000
-;;                                           (reg-encode rm)
-;;                                           ,op2
-;;                                           (reg-encode rn)))))
-
-;;            ;; SMLALBB RdLo, RdHi, Rn, Rm
-;;            (define-a527-subtype3-instruction (name op1 op2)
-;;              `(define-instruction ,name (segment cnd rdlo rdhi rn rm)
-;;                 (:emitter (emit-a527-inst segment (conditional-opcode cnd)
-;;                                           #b00010 ,op1 #b0
-;;                                           (reg-encode rdhi)
-;;                                           (reg-encode rdlo)
-;;                                           (reg-encode rm)
-;;                                           ,op2
-;;                                           (reg-encode rn)))))
-
-
-;;            )
-;;   (define-a527-subtype1-instruction smlabb  #b00 #b1000)
-;;   (define-a527-subtype1-instruction smlatb  #b00 #b1010)
-;;   (define-a527-subtype1-instruction smlabt  #b00 #b1100)
-;;   (define-a527-subtype1-instruction smlatt  #b00 #b1110)
-;;   (define-a527-subtype1-instruction smlawb  #b01 #b1000)
-;;   (define-a527-subtype2-instruction smulwb  #b01 #b1010)
-;;   (define-a527-subtype1-instruction smlawt  #b01 #b1100)
-;;   (define-a527-subtype2-instruction smulwt  #b01 #b1110)
-;;   (define-a527-subtype3-instruction smlalbb #b10 #b1000)
-;;   (define-a527-subtype3-instruction smlaltb #b10 #b1010)
-;;   (define-a527-subtype3-instruction smlalbt #b10 #b1100)
-;;   (define-a527-subtype3-instruction smlaltt #b10 #b1110)
-;;   (define-a527-subtype2-instruction smulbb  #b11 #b1110)
-;;   (define-a527-subtype2-instruction smultb  #b11 #b1110)
-;;   (define-a527-subtype2-instruction smulbt  #b11 #b1110)
-;;   (define-a527-subtype2-instruction smultt  #b11 #b1110)
-;; )
-
-;; ;; TODO: implement the [] syntax printing in disassembly
-;; (macrolet (
-;;            ;; STRH Rt, [Rn, -Rm]!
-;;            (define-a528-instruction (name op1 op2)
-;;              `(define-instruction ,name (segment cnd rt rn rm-or-imm4l
-;;                                                  &key add wback index (imm4h 0))
-;;                 (:emitter
-;;                  (let ((fld #b00000000))
-;;                    (setf fld (logior fld
-;;                                      ;; TODO: unbox 0 1 and immed values
-;;                                      (ash (if (typep rm-or-imm4l 'tn) 0 1) 2)
-;;                                      ,op1))
-;;                    (when index (setf fld (logior fld #b00010000)))
-;;                    (when add   (setf fld (logior fld #b00001000)))
-;;                    (when wback (setf fld (logior fld #b00000010)))
-;;                    (emit-a528-inst segment (conditional-opcode cnd) fld
-;;                                    (reg-encode rn)
-;;                                    (reg-encode rt)
-;;                                    (if (typep rm-or-imm4l 'tn) #b0000 imm4h)
-;;                                    ,op2
-;;                                    (if (typep rm-or-imm4l 'tn)
-;;                                        (reg-encode rm-or-imm4l)
-;;                                        rm-or-imm4l))))))
-;;            )
-;;   (define-a528-instruction strh  0 #b1011)
-;;   (define-a528-instruction ldrh  1 #b1011)
-;;   (define-a528-instruction ldrd  0 #b1101)
-;;   (define-a528-instruction ldrsb 1 #b1101)
-;;   (define-a528-instruction strd  0 #b1111)
-;;   (define-a528-instruction ldrsh 1 #b1111)
-;; )
-
-;; ;; TODO: implement the [] syntax printing in disassembly
-;; (macrolet (
-;;            ;; STRH Rt, [Rn, -Rm]!
-;;            (define-a529-instruction (name op1 op2)
-;;              `(define-instruction ,name (segment cnd rt rn rm-or-imm4l
-;;                                                  &key add (imm4h 0))
-;;                 (:emitter
-;;                  (let ((fld #b00000010))
-;;                    (setf fld (logior fld
-;;                                      ;; TODO: unbox 0 1 and immed values
-;;                                      (ash (if (typep rm-or-imm4l 'tn) 0 1) 2)
-;;                                      ,op1))
-;;                    (when add (setf fld (logior fld #b00001000)))
-;;                    (emit-a528-inst segment (conditional-opcode cnd) fld
-;;                                    (reg-encode rn)
-;;                                    (reg-encode rt)
-;;                                    (if (typep rm-or-imm4l 'tn) #b0000 imm4h)
-;;                                    ,op2
-;;                                    (if (typep rm-or-imm4l 'tn)
-;;                                        (reg-encode rm-or-imm4l)
-;;                                        rm-or-imm4l))))))
-;;            )
-;;   (define-a529-instruction strht  0 #b1011)
-;;   (define-a529-instruction ldrht  1 #b1011)
-;;   (define-a529-instruction ldrsbt 1 #b1101)
-;;   (define-a529-instruction ldrsht 1 #b1111)
-;;   )
-
-;; (macrolet (
-;;            ;; SWP, SWPB
-;;            (define-a5210-subtype1-instruction (name fld)
-;;              `(define-instruction ,name (segment cnd rt rt2 rn)
-;;                 (:emitter
-;;                  (emit-a528-inst segment (conditional-opcode cnd)
-;;                                  ,fld
-;;                                  (reg-encode rn)
-;;                                  (reg-encode rt)
-;;                                  #b0000 #b1001
-;;                                  (reg-encode rt2)))))
-
-;;            ;; LDREX, LDREXD, LDREXB, LDREXH
-;;            (define-a5210-subtype2-instruction (name fld)
-;;              `(define-instruction ,name (segment cnd rd rt rn)
-;;                 (:emitter
-;;                  (emit-a528-inst segment (conditional-opcode cnd)
-;;                                  ,fld
-;;                                  (reg-encode rn)
-;;                                  (reg-encode rd)
-;;                                  #b1111 #b1001
-;;                                  (reg-encode rt)))))
-
-;;            ;; STREX, STREXD, STREXB, STREXH
-;;            (define-a5210-subtype3-instruction (name fld)
-;;              `(define-instruction ,name (segment cnd rt rn)
-;;                 (:emitter
-;;                  (emit-a528-inst segment (conditional-opcode cnd)
-;;                                  ,fld
-;;                                  (reg-encode rn)
-;;                                  (reg-encode rt)
-;;                                  #b1111 #b1001 #b1111))))
-;;            )
-;;   (define-a5210-subtype1-instruction swp    #b00010000)
-;;   (define-a5210-subtype1-instruction swpb   #b00010100)
-;;   (define-a5210-subtype2-instruction strex  #b00011000)
-;;   (define-a5210-subtype3-instruction ldrex  #b00011001)
-;;   (define-a5210-subtype2-instruction strexd #b00011010)
-;;   (define-a5210-subtype3-instruction ldrexd #b00011011)
-;;   (define-a5210-subtype2-instruction strexb #b00011100)
-;;   (define-a5210-subtype3-instruction ldrexb #b00011101)
-;;   (define-a5210-subtype2-instruction strexh #b00011110)
-;;   (define-a5210-subtype3-instruction ldrexh #b00011111)
-;;   )
-
-;; (macrolet (
-;;            ;; NOP and the other hints
-;;            (define-a5211-subtype1-instruction (name op21 op22)
-;;              `(define-instruction ,name (segment cnd)
-;;                 (:emitter
-;;                  (emit-a528-inst segment (conditional-opcode cnd)
-;;                                   #b00110010
-;;                                   #b0000 #b1111 #b0000
-;;                                   ,op21 ,op22))))
-
-;;            (define-a5211-subtype2-instruction (name op21)
-;;              `(define-instruction ,name (segment cnd option)
-;;                 (:emitter
-;;                  (emit-a528-inst segment (conditional-opcode cnd)
-;;                                  #b00110010
-;;                                  #b0000 #b1111 #b0000
-;;                                  ,op21 option))))
-
-;;            (define-a5211-subtype3-instruction (name)
-;;              `(define-instruction ,name (segment cnd spec-reg mask
-;;                                                  rn-or-immed12)
-;;                 (:emitter
-;;                  (if (typep rn-or-immed12 'tn)
-;;                      (let ((msk (ash mask 2)))
-;;                        (emit-a525-inst segment (conditional-opcode cnd)
-;;                                        #b0001 #b0010 msk
-;;                                        #b1111 #b0000 #b0000
-;;                                        (reg-encode rn-or-immed12)))
-;;                      (let ((fld (cond
-;;                                   ((eq spec-reg :cpsr) #b00110010)
-;;                                   ((eq spec-reg :spsr) #b00110110)
-;;                                   (t (error "unknown spec-reg in a5211!")))))
-;;                        (emit-a5211-inst segment (conditional-opcode cnd)
-;;                                         fld
-;;                                         mask
-;;                                         #b1111
-;;                                         (ror-immed12 rn-or-immed12)))))))
-;;            )
-;;   (define-a5211-subtype1-instruction nop   #b0000 #b0000)
-;;   (define-a5211-subtype1-instruction yield #b0000 #b0001)
-;;   (define-a5211-subtype1-instruction wfe   #b0000 #b0010)
-;;   (define-a5211-subtype1-instruction wfi   #b0000 #b0011)
-;;   (define-a5211-subtype1-instruction sev   #b0000 #b0100)
-;;   (define-a5211-subtype2-instruction dbg   #b1111)
-;;   (define-a5211-subtype3-instruction msr)
-;;   )
-
-
-;; (macrolet (
-;;            (define-a5212-subtype1-instruction (name op1)
-;;              `(define-instruction ,name (segment cnd rm)
-;;                 (:emitter
-;;                  (emit-a525-inst segment (conditional-opcode cnd) #b0001 #b0010
-;;                                  #b1111 #b1111 #b1111 ,op1 (reg-encode rm)))))
-;;            )
-
-;;   (define-a5212-subtype1-instruction bx  #b0001)
-;;   (define-a5212-subtype1-instruction bxj #b0010)
-;;   (define-a5212-subtype1-instruction blx #b0011)
-
-;;   (define-instruction mrs (segment cnd rd)
-;;     (:emitter
-;;      (emit-a5211-inst segment (conditional-opcode cnd) #b00010000 #b1111
-;;                       (reg-encode rd) #b000000000000)))
-
-;;   (define-instruction clz (segment cnd rd rm)
-;;     (:emitter
-;;      (emit-a525-inst segment (conditional-opcode cnd) #b0001 #b0110 #b1111
-;;                      (reg-encode rd) #b1111 #b0001 (reg-encode rm))))
-
-;;   (define-instruction bkpt (segment immed4 &optional (immed12 0))
-;;     (:emitter
-;;      (emit-a5212-inst segment #b1110 #b00010010 immed12 #b0111 immed4)))
-
-;;   (define-instruction smc (segment cnd immed4)
-;;     (:emitter
-;;      (emit-a5212-inst segment (conditional-opcode cnd) #b00010110
-;;                       #b000000000000 #b0111 immed4)))
-;; )
 
 
 ;; (defknown %bahor (fixnum fixnum) fixnum (always-translatable))

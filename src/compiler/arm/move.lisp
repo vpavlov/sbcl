@@ -167,7 +167,7 @@
   (:temporary (:scs (non-descriptor-reg)) temp)
   (:generator 4
     (let ((done (gen-label)))
-      (inst ands temp x :src2 fixnum-tag-mask)
+      (inst ands temp x fixnum-tag-mask)
       (inst asr y x n-fixnum-tag-bits)
       (inst b done :cnd :eq)
       (loadw y x bignum-digits-offset other-pointer-lowtag)
@@ -203,7 +203,7 @@
 	  (done (gen-label)))
       (inst asrs temp x (- n-word-bits n-lowtag-bits))  ;; leave top 3 bits
       (inst b fixnum :cnd :eq)  ;; if they are all 0, it will fit in a fixnum
-      (inst mvns temp temp)     ;; it will also fit, if they are all 1
+      (inst mvns temp temp temp)     ;; it will also fit, if they are all 1
       (inst b fixnum :cnd :eq)
       ;; bignum case. allocate a bignum and store it there
       (with-fixed-allocation (y temp temp2 bignum-widetag
@@ -236,7 +236,7 @@
       (inst b done :cnd :eq)
       (with-fixed-allocation (y temp temp2 bignum-widetag
 				(+ 2 bignum-digits-offset))
-	(inst cmp x 0)
+	(inst cmp a0-tn x 0)
 	(inst lr temp (logior (ash 1 n-widetag-bits) bignum-widetag))
 	(inst b one-word :cnd :ge)
         (inst lr temp (logior (ash 2 n-widetag-bits) bignum-widetag))
