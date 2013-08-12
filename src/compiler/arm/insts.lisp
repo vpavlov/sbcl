@@ -874,9 +874,25 @@ ROTATION*2 times the value IMMED8 into a 32-bit integer."
 	    (dpb (cond-encoding cnd) (byte 4 28)
 		 (dpb #b1010 (byte 4 24)
 		      (ash (- (label-position target) posn) -2))))))))))
-
+;;;;
 ;;;; End of A5.5
 ;;;;============================================================================
+
+
+
+
+;;;;============================================================================
+;;;; A5.7 Unconditional instructions
+;;;;
+(define-instruction isb (segment)
+  (:delay 1)
+  (:cost 1)
+  (:emitter
+   (emit-word segment #xf57ff06f)))
+;;;;
+;;;; End of A5.5
+;;;;============================================================================
+
 
 
 
