@@ -670,9 +670,11 @@ elif [ "$sbcl_arch" = "hppa" ]; then
     printf ' :stack-allocatable-lists' >> $ltf
 elif [ "$sbcl_arch" = "arm" ]; then
     # FIXME: this is only preliminary at this point, copied from x86
-    # -- vnp 2013-05-10
+    # -- VNP 2013-05-10
+    # for now remove :compare-and-swap-vops, until we implement them
+    # -- VNP 2013-08-18
     printf ' :gencgc :stack-grows-downward-not-upward :c-stack-is-control-stack' >> $ltf
-    printf ' :compare-and-swap-vops :unwind-to-frame-and-call-vop :raw-instance-init-vops' >> $ltf
+    printf ' :unwind-to-frame-and-call-vop :raw-instance-init-vops' >> $ltf
     printf ' :stack-allocatable-closures :stack-allocatable-vectors' >> $ltf
     printf ' :stack-allocatable-lists :stack-allocatable-fixed-objects' >> $ltf
     printf ' :alien-callbacks :cycle-counter :inline-constants ' >> $ltf
